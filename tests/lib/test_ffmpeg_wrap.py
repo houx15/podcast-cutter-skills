@@ -27,7 +27,7 @@ def _silence_input(tmp_path: Path) -> Path:
 
 
 def _tone_input(tmp_path: Path) -> Path:
-    """A 1 kHz sine at -6 dB; safely above the silence trap."""
+    """A 1 kHz sine boosted to ~-6 dBFS; safely above the -10 dB silence trap."""
     out = tmp_path / "tone.wav"
     ffmpeg_wrap.run_ffmpeg(
         [
@@ -36,7 +36,7 @@ def _tone_input(tmp_path: Path) -> Path:
             "-i",
             "sine=frequency=1000:duration=2",
             "-af",
-            "volume=0.5",
+            "volume=4",
             "-c:a",
             "pcm_s16le",
             "-ar",
@@ -78,7 +78,7 @@ def test_run_ffmpeg_succeeds_for_audible_output(tmp_path: Path) -> None:
             "-i",
             "sine=frequency=1000:duration=1",
             "-af",
-            "volume=0.5",
+            "volume=4",
             "-c:a",
             "pcm_s16le",
             str(out),
