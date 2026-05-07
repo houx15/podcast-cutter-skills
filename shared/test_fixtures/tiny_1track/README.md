@@ -1,0 +1,1 @@
+Place a 60s single-track Chinese podcast sample here as `merged.mp3`, and the golden `words.json`, `delete_segments_edited.json`, and `final.mp3` checksums alongside. Add files only after recording consent has been confirmed.
