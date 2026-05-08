@@ -125,8 +125,7 @@ def test_llm_config_loaded(tmp_path):
         "LLM_BASE_URL=https://ark.example.com/api/v3\n"
         "LLM_MODEL=doubao-test\n"
     )
-    from lib.config import load
-    cfg = load(env)
+    cfg = config.load(env_path=env)
     assert cfg.llm.api_key == "ark-test"
     assert cfg.llm.base_url == "https://ark.example.com/api/v3"
     assert cfg.llm.model == "doubao-test"
@@ -135,7 +134,5 @@ def test_llm_config_loaded(tmp_path):
 def test_llm_config_missing_key_raises(tmp_path):
     env = tmp_path / ".env"
     env.write_text("VOLC_API_KEY=testkey\nLLM_BASE_URL=https://x\nLLM_MODEL=m\n")
-    from lib.config import load, ConfigError
-    import pytest
-    with pytest.raises(ConfigError, match="LLM_API_KEY"):
-        load(env)
+    with pytest.raises(config.ConfigError, match="LLM_API_KEY"):
+        config.load(env_path=env)
