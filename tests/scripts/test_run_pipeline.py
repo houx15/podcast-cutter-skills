@@ -30,9 +30,11 @@ def test_resume_requires_delete_segments(tmp_path):
     ep_dir = tmp_path / "ep"
     (ep_dir / "3_review").mkdir(parents=True)
     with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir), "--resume"]):
-        with unittest.mock.patch("sys.exit") as mock_exit:
+        with unittest.mock.patch("sys.exit") as mock_exit, \
+             unittest.mock.patch("subprocess.run") as mock_run:
             mod.main()
     mock_exit.assert_called_once_with(1)
+    mock_run.assert_not_called()
 
 
 def test_resume_runs_stage4(tmp_path):
