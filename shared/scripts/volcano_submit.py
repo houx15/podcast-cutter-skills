@@ -50,17 +50,19 @@ def main() -> None:
     )
     resp = requests.post(SUBMIT_URL, headers=headers, json=payload, timeout=30)
     resp.raise_for_status()
-    data = resp.json()
-    try:
-        returned_task_id = data["resp"]["task_id"]
-    except (KeyError, TypeError) as exc:
-        raise RuntimeError(f"Volcano submit response missing 'task_id': {data}") from exc
+    status_code = resp.headers.get("X-Api-Status-Code", "")
+    if status_code != "20000000":
+        logid = resp.headers.get("X-Tt-Logid", "")
+        raise RuntimeError(
+            f"Volcano submit failed: X-Api-Status-Code={status_code} "
+            f"X-Tt-Logid={logid} body={resp.text}"
+        )
 
     ep_dir = Path(args.ep_dir)
     out_dir = ep_dir / "1_transcribe"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"task_id_track{args.track_num}.txt").write_text(returned_task_id)
-    print(returned_task_id)
+    (out_dir / f"task_id_track{args.track_num}.txt").write_text(task_id)
+    print(task_id)
 
 
 if __name__ == "__main__":

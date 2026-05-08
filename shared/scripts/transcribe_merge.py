@@ -6,9 +6,15 @@ from pathlib import Path
 
 
 def _parse_words_from_raw(raw: dict, speaker: str) -> list[dict]:
+    """Read utterances from a Volcano AUC v3 query response.
+
+    The body shape is `{"audio_info": {...}, "result": {"text": ..., "utterances": [...]}}`.
+    Older revisions of this script looked under `resp` — that key never existed.
+    """
     words = []
     idx = 0
-    for utt in raw.get("resp", {}).get("utterances", []):
+    result = raw.get("result") or {}
+    for utt in result.get("utterances", []):
         for w in utt.get("words", []):
             words.append({
                 "idx": idx,

@@ -38,19 +38,23 @@ def main() -> None:
 
     for attempt in range(args.max_attempts):
         headers = build_query_headers(cfg.volcano, task_id)
-        payload = {"user": {"uid": "podcast_cutter"}, "request": {"id": task_id}}
-        resp = requests.post(QUERY_URL, headers=headers, json=payload, timeout=30)
+        # Per docs/volcano_asr.md: query body is empty JSON.
+        resp = requests.post(QUERY_URL, headers=headers, json={}, timeout=30)
         resp.raise_for_status()
-        data = resp.json()
-        code = str(data["resp"]["code"])
+        code = resp.headers.get("X-Api-Status-Code", "")
         status = classify_status(code)
         if status is QueryStatus.SUCCESS:
+            data = resp.json()
             out = ep_dir / "1_transcribe" / f"volcano_raw_track{args.track_num}.json"
             out.write_text(json.dumps(data, ensure_ascii=False, indent=2))
             print(f"Done -> {out}")
             return
         if status is QueryStatus.HARD_FAIL:
-            raise RuntimeError(f"Volcano task failed code={code}: {data}")
+            logid = resp.headers.get("X-Tt-Logid", "")
+            raise RuntimeError(
+                f"Volcano task failed: X-Api-Status-Code={code} "
+                f"X-Tt-Logid={logid} body={resp.text}"
+            )
         if args.interval > 0:
             time.sleep(args.interval)
 

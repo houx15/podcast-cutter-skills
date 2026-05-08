@@ -7,10 +7,13 @@ REPO = "/Users/houyuxin/08Coding/podcast-cutter-skills"
 
 
 def _raw(task_id="t1", words=None):
+    """Volcano AUC v3 query body: utterances live under `result`, not `resp`."""
     words = words or [{"text": "你", "start_time": 100, "end_time": 300,
                         "confidence": 0.9, "blank_duration": 50}]
-    return {"resp": {"code": "20000000", "task_id": task_id,
-                     "utterances": [{"words": words}]}}
+    return {
+        "audio_info": {"duration": 1000},
+        "result": {"text": "test", "utterances": [{"words": words}]},
+    }
 
 
 def test_single_track_words_json(tmp_path):
@@ -86,10 +89,10 @@ def test_track_offsets_applied(tmp_path):
     td.mkdir(parents=True)
     in_dir.mkdir(parents=True)
 
-    raw1 = {"resp": {"utterances": [{"words": [
+    raw1 = {"result": {"utterances": [{"words": [
         {"text": "嗯", "start_time": 0, "end_time": 300, "confidence": 0.9, "blank_duration": 50},
     ]}]}}
-    raw2 = {"resp": {"utterances": [{"words": [
+    raw2 = {"result": {"utterances": [{"words": [
         {"text": "对", "start_time": 0, "end_time": 300, "confidence": 0.9, "blank_duration": 50},
     ]}]}}
     (td / "volcano_raw_track1.json").write_text(json.dumps(raw1))
