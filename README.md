@@ -22,41 +22,22 @@ pip install -e ".[dev]"
 cp .env.example .env
 # Edit .env — set VOLC_API_KEY and LLM_API_KEY at minimum
 
-# 3. Prepare audio (replace paths and episode ID as needed)
-python shared/scripts/prepare_audio.py \
+# 3. Run the pipeline (transcription + analysis, ~5–20 min)
+python shared/scripts/run_pipeline.py \
+  --ep-dir output/2026-05-08-ep01 \
   --track1 recordings/host.wav \
-  --track2 recordings/guest.wav \
-  --ep-dir output/2026-05-08-ep01
+  --track2 recordings/guest.wav
 
-# 4. Upload working WAV(s) and submit to ASR
-#    (upload is embedded inside volcano_submit.py)
-python shared/scripts/volcano_submit.py --ep-dir output/2026-05-08-ep01
-python shared/scripts/volcano_query.py  --ep-dir output/2026-05-08-ep01
+# 4. Review in browser (the pipeline prints the server command and HTML path)
+python shared/scripts/review_server.py --ep-dir output/2026-05-08-ep01 --port 5050
+# Open the printed review_enhanced.html path, review cuts, click Export
 
-# 5. Merge transcription + build sentences
-python shared/scripts/transcribe_merge.py --ep-dir output/2026-05-08-ep01
-python shared/scripts/make_sentences.py   --ep-dir output/2026-05-08-ep01
-
-# 6. LLM analysis (three passes)
-python shared/scripts/analyze_rough.py --ep-dir output/2026-05-08-ep01
-python shared/scripts/analyze_fine.py  --ep-dir output/2026-05-08-ep01
-python shared/scripts/self_review.py   --ep-dir output/2026-05-08-ep01
-
-# 7. Human review (open the HTML, then export delete_segments_edited.json)
-python shared/scripts/generate_review_html.py --ep-dir output/2026-05-08-ep01
-python shared/scripts/review_server.py        --ep-dir output/2026-05-08-ep01 --port 5050
-# Open output/2026-05-08-ep01/3_review/review_enhanced.html in your browser.
-# When done reviewing, click Export to produce delete_segments_edited.json.
-
-# 8. Cut and trim
-python shared/scripts/cut_audio.py    --ep-dir output/2026-05-08-ep01
-python shared/scripts/trim_silences.py --ep-dir output/2026-05-08-ep01
+# 5. Finish the cut
+python shared/scripts/run_pipeline.py --ep-dir output/2026-05-08-ep01 --resume
 # Result: output/2026-05-08-ep01/4_cut/cut.wav
 ```
 
-For a complete worked example, see [docs/剪播客/快速上手.md](docs/剪播客/快速上手.md).
-
-The pipeline can also be run through the Claude Code skill: `/podcast-cut-剪播客`.
+For alignment options, troubleshooting, and per-stage details, see [docs/剪播客/快速上手.md](docs/剪播客/快速上手.md).
 
 ## Stage Pipeline
 
