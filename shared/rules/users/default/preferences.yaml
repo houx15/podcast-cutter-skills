@@ -1,0 +1,8 @@
+user_id: default
+language: zh-CN
+style: natural  # natural | polished
+aggressiveness: moderate  # conservative | moderate | aggressive
+min_confidence: 0.7
+max_delete_ratio: 0.4  # never delete more than 40% of audio
+preserve_laughter: true
+preserve_emotional_pauses: true

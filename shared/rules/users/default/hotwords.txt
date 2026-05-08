@@ -1,0 +1,4 @@
+# One hotword per line. Feeds Volcano corpus.context.hotwords.
+# Example:
+# 字节跳动
+# 豆包
