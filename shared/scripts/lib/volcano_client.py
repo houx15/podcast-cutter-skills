@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from shared.scripts.lib.config import VolcanoConfig
+from .config import VolcanoConfig
 
 SUBMIT_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
 QUERY_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from shared.scripts.lib import audio_constants
+from . import audio_constants
 
 
 @dataclass
