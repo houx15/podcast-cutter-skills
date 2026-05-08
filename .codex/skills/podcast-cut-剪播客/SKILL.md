@@ -57,6 +57,17 @@ python shared/scripts/trim_silences.py --ep-dir EP_DIR
 
 输出：`EP_DIR/4_cut/cut.wav`
 
+## 阶段 5：节目说明（Show Notes）
+
+```bash
+# 5.0 把句子重映射到 cut.wav 的时间轴（脚本，确定性）
+python shared/scripts/cut_transcript.py --ep-dir EP_DIR
+```
+
+5.1 你来写：读 `EP_DIR/5_shownotes/cut_transcript.json` + `shared/rules/users/default/shownotes_example.md`（用户的样本/模板），按样本的章节顺序与口吻为本期生成 `EP_DIR/5_shownotes/shownotes.md`。
+
+要点：时间轴使用 cut 时间轴（不是原始录音时间），Highlights 是原话提炼，名词解释只覆盖本期出现的术语。
+
 ## 续传
 
 每脚本输出唯一文件。删掉对应输出后重跑即可。

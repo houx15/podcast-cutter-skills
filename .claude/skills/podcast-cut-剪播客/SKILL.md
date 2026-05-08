@@ -220,6 +220,47 @@ python shared/scripts/trim_silences.py --ep-dir EP_DIR
 
 ---
 
+## 阶段 5：节目说明（Show Notes）
+
+### 5.0 重新计时句子（脚本）
+
+把句子级转录映射到 cut.wav 的时间轴上——删掉的区间会被去除，剩下的句子时间戳会被左移。这一步是确定性的，所以是脚本：
+
+```bash
+python shared/scripts/cut_transcript.py --ep-dir EP_DIR
+```
+
+输出：`EP_DIR/5_shownotes/cut_transcript.json`，每条句子带 `start_ms`（cut 时间轴）与 `orig_start_ms`（原始时间轴）以便回查。
+
+### 5.1 撰写节目说明（**你来做**）
+
+读取以下文件，按用户的样本结构生成 `EP_DIR/5_shownotes/shownotes.md`：
+
+- `EP_DIR/5_shownotes/cut_transcript.json` — 听众实际听到的内容（cut 时间轴）
+- `shared/rules/users/default/shownotes_example.md` — **样本/模板** — 不同播客有不同风格，照着这一份的章节顺序、口吻、密度来写
+
+**章节通常包括**：
+1. 标题（一句话抓住本期主旨）
+2. 节目简介（沿用样本里的 boilerplate）
+3. 本期摘要段（约 150–300 字，讲清楚主线和金句）
+4. 主播介绍（沿用样本）
+5. Highlights（5 条最具传播力的引语，要凝练，不要原文照搬）
+6. 本期你将听到（8–10 条好奇心驱动的问题）
+7. 时间轴 Timeline — **使用 cut 时间轴**（`mm:ss` 或 `hh:mm:ss`），由 cut_transcript.json 中句子的 `start_ms` 推导
+8. 名词解释（本期出现的特定术语、人名、产品）
+9. 延伸思考 Extension（4–5 条引发读者思考的开放问题）
+10. 关于我们 About Us（沿用样本，更新期数）
+
+**写法要点**：
+- 时间轴的时间戳必须落在 cut 时间轴上，不是原始录音时间
+- Highlights 的引语要"原话提炼"，不要拼接造句
+- 名词解释只解释**这一期出现过**的术语，不要堆砌
+- 摘要段要给出"本期讲了什么"和"为什么值得听"两层意思
+
+输出：`EP_DIR/5_shownotes/shownotes.md`
+
+---
+
 ## 续传与幂等
 
 每个脚本输出唯一文件。如需重跑某阶段，先删掉对应输出文件再重新运行。例如：
