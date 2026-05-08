@@ -76,3 +76,45 @@ def test_duration_from_audio_meta(tmp_path):
 
     words = json.loads((td / "words.json").read_text())
     assert words["duration_ms"] == 60000
+
+
+def test_track_offsets_applied(tmp_path):
+    """track_offsets_ms in audio_meta.json shifts word timestamps before merge."""
+    ep_dir = tmp_path / "ep"
+    td = ep_dir / "1_transcribe"
+    in_dir = ep_dir / "input"
+    td.mkdir(parents=True)
+    in_dir.mkdir(parents=True)
+
+    raw1 = {"resp": {"utterances": [{"words": [
+        {"text": "嗯", "start_time": 0, "end_time": 300, "confidence": 0.9, "blank_duration": 50},
+    ]}]}}
+    raw2 = {"resp": {"utterances": [{"words": [
+        {"text": "对", "start_time": 0, "end_time": 300, "confidence": 0.9, "blank_duration": 50},
+    ]}]}}
+    (td / "volcano_raw_track1.json").write_text(json.dumps(raw1))
+    (td / "volcano_raw_track2.json").write_text(json.dumps(raw2))
+
+    meta = {
+        "episode_id": "test", "total_duration_ms": 5000,
+        "tracks": [
+            {"file": "working_track1.wav", "duration_ms": 5000, "sample_rate": 44100},
+            {"file": "working_track2.wav", "duration_ms": 5000, "sample_rate": 44100},
+        ],
+        "track_offsets_ms": [0, 500],
+    }
+    (in_dir / "audio_meta.json").write_text(json.dumps(meta))
+
+    subprocess.run(
+        ["python", "shared/scripts/transcribe_merge.py", "--ep-dir", str(ep_dir)],
+        check=True, capture_output=True, cwd=REPO
+    )
+
+    words_json = json.loads((td / "words.json").read_text())
+    words = words_json["words"]
+    s1 = next(w for w in words if w["speaker"] == "S1")
+    s2 = next(w for w in words if w["speaker"] == "S2")
+    assert s1["start_ms"] == 0
+    assert s2["start_ms"] == 500
+    assert words[0]["speaker"] == "S1"
+    assert words[1]["speaker"] == "S2"

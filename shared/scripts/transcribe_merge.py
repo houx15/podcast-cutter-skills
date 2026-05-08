@@ -39,15 +39,26 @@ def main() -> None:
     if not track_files:
         raise FileNotFoundError(f"No volcano_raw_track*.json in {td}")
 
-    all_words = []
-    speakers = []
-    track_names = []
+    meta_file = ep_dir / "input" / "audio_meta.json"
+    meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+    offsets = meta.get("track_offsets_ms", [0] * len(track_files))
+    while len(offsets) < len(track_files):
+        offsets.append(0)
+
+    all_words: list[dict] = []
+    speakers: list[dict] = []
+    track_names: list[str] = []
     for i, tf in enumerate(track_files, start=1):
         raw = json.loads(tf.read_text())
         speaker = f"S{i}"
         speakers.append({"id": speaker, "name": None, "track": f"working_track{i}.wav"})
         track_names.append(f"working_track{i}.wav")
+        shift = offsets[i - 1]
         words = _parse_words_from_raw(raw, speaker)
+        if shift:
+            for w in words:
+                w["start_ms"] += shift
+                w["end_ms"] += shift
         all_words.extend(words)
 
     mode = "two_track" if len(track_files) >= 2 else "single_track"
@@ -55,12 +66,8 @@ def main() -> None:
     for i, w in enumerate(all_words):
         w["idx"] = i
 
-    # probe total duration from audio_meta.json if present
-    meta_file = ep_dir / "input" / "audio_meta.json"
     duration_ms = all_words[-1]["end_ms"] if all_words else 0
-    if meta_file.exists():
-        meta = json.loads(meta_file.read_text())
-        duration_ms = meta.get("total_duration_ms", duration_ms)
+    duration_ms = meta.get("total_duration_ms", duration_ms)
 
     out = {
         "episode_id": ep_id,
@@ -70,7 +77,7 @@ def main() -> None:
         "words": all_words,
     }
     (td / "words.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
-    print(f"words.json: {len(all_words)} words, mode={mode}")
+    print(f"words.json: {len(all_words)} words, mode={mode}, offsets={offsets}")
 
 
 if __name__ == "__main__":
