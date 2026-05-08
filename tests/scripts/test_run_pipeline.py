@@ -92,6 +92,28 @@ def test_resume_with_delete_segments_runs_stage4(tmp_path):
     assert "trim_silences.py" in scripts_called
 
 
+def test_resume_skips_cut_audio_if_cut_wav_exists(tmp_path):
+    """--resume skips cut_audio.py if cut.wav exists, but still runs trim_silences.py."""
+    mod = _load()
+    ep_dir = tmp_path / "ep"
+    _make_analysis(ep_dir)
+    rd = ep_dir / "3_review"
+    rd.mkdir(parents=True)
+    (rd / "delete_segments_edited.json").write_text('{"deletes":[]}')
+    cut_dir = ep_dir / "4_cut"
+    cut_dir.mkdir(parents=True)
+    (cut_dir / "cut.wav").write_bytes(b"RIFF" + b"\x00" * 4)  # pre-existing cut
+
+    with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir), "--resume"]):
+        with unittest.mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mod.main()
+
+    scripts_called = [Path(c.args[0][1]).name for c in mock_run.call_args_list]
+    assert "cut_audio.py" not in scripts_called
+    assert "trim_silences.py" in scripts_called
+
+
 def test_resume_skips_html_if_already_exists(tmp_path):
     """--resume skips generate_review_html.py if review_enhanced.html already exists."""
     mod = _load()
