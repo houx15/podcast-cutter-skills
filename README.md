@@ -105,6 +105,69 @@ python shared/scripts/trim_silences.py --ep-dir output/2026-05-08-ep01
 
 For details (alignment options, error codes, the analysis JSON formats), see `.claude/skills/podcast-cut-剪播客/SKILL.md` or `docs/剪播客/快速上手.md`.
 
+## Using This Skill in a Remote Agent (Cowork etc.)
+
+A remote agent (e.g. Cowork, GitHub Actions, a hosted Claude Code session) runs the same SKILL.md you'd run locally — but three things change because the agent doesn't share your filesystem or browser:
+
+### 1. Configure secrets, not `.env`
+
+The agent has no `.env` file. Set these as secrets / runtime env vars in the remote runtime:
+
+| Secret | Required? | Purpose |
+|--------|-----------|---------|
+| `VOLC_API_KEY` | yes | Volcano ASR (new console) |
+| `VOLC_RESOURCE_ID` | yes | `volc.seedasr.auc` |
+| `TOS_ACCESS_KEY` | yes | Object storage for audio uploads |
+| `TOS_SECRET_KEY` | yes | |
+| `TOS_BUCKET` | yes | |
+| `TOS_ENDPOINT` | yes | e.g. `tos-cn-beijing.volces.com` |
+
+`python-dotenv` reads shell env first, so the same scripts work without modification. (Old-console Volcano accounts can use `VOLC_APP_KEY` + `VOLC_ACCESS_KEY` instead of `VOLC_API_KEY`.)
+
+### 2. Get recordings to the agent
+
+The agent has no local `recordings/` dir. Two patterns:
+
+**A. Pre-upload recordings to TOS yourself** (recommended for large dual-track files):
+
+```bash
+# On your laptop — upload to a bucket the agent's TOS keys can read:
+aws s3 cp track1-host.wav s3://your-bucket/episodes/ep04/track1.wav --endpoint-url https://tos-s3-cn-beijing.volces.com
+```
+
+Then trigger the agent with the URL. In `prepare_audio.py`, point `--track1` at a local path the agent downloads first, e.g.:
+
+```bash
+curl -fsSLo recordings/track1.wav "https://...presigned-url..."
+python shared/scripts/prepare_audio.py --ep-dir output/ep04 --track1 recordings/track1.wav
+```
+
+**B. Commit small reference clips to a private repo branch**, and have the agent check out that branch. Practical for short test clips, not for full recordings.
+
+### 3. Skip the browser review step
+
+`review_server.py` serves on `localhost:5050` — no use on a remote agent. Two options:
+
+**A. Auto-accept the agent's analysis** (full automation): after the agent writes `rough_cuts.json` / `fine_cuts.json` / `self_review.json`, it composes `delete_segments_edited.json` directly from those (union of `rough_cuts.deletes` + `fine_cuts.deletes`, dropping anything the `self_review.flags` marked as `false_positive`), then runs stage 4. No human in the loop.
+
+**B. Two-shot with you doing review locally**: agent runs through stage 3.0, uploads `review_enhanced.html` + `delete_segments.json` somewhere you can fetch (TOS, gist, PR). You review locally, push back `delete_segments_edited.json`, then trigger the agent again to finish stage 4.
+
+For Cowork specifically, **Pattern A** is the natural fit — the orchestrating agent is the analyst, and you trust its judgment based on the editing rules in `shared/rules/editing/`. If you want oversight, run a small clip locally first, tune the rules, then let Cowork loose on full episodes.
+
+### 4. Where the output lives
+
+`output/<ep-id>/4_cut/cut.wav` and `5_shownotes/shownotes.md` end up on the agent's filesystem. To get them back:
+
+- **TOS upload**: have the agent upload `cut.wav` to your TOS bucket as a final step (`aws s3 cp` or extend `lib/upload.py`).
+- **Commit & PR**: agent commits `5_shownotes/shownotes.md` (text only) to a branch and opens a PR. `cut.wav` is too large for git — keep it in object storage.
+- **Slack / direct delivery**: depends on the agent runtime — Cowork can post the TOS URL back in the channel.
+
+### Minimal trigger message (Cowork example)
+
+> "剪播客 — 录音在 TOS: `s3://your-bucket/episodes/ep04/track1.wav` + `track2.wav`，episode id `ep04`。请按 Pattern A 自动完成全流程，输出 `cut.wav` + `shownotes.md` 上传回 `s3://your-bucket/episodes/ep04/output/`。"
+
+The agent reads `.claude/skills/podcast-cut-剪播客/SKILL.md`, runs each stage, does the analysis itself, and posts the output URLs back when done.
+
 ## Stage Pipeline
 
 | Stage | Script | Input | Output |
@@ -120,6 +183,8 @@ For details (alignment options, error codes, the analysis JSON formats), see `.c
 | 3.1 | (browser, manual) | — | `delete_segments_edited.json` |
 | 4.0 | `cut_audio.py` | working WAV + delete_segments_edited | `cut.wav` |
 | 4.1 | `trim_silences.py` | cut.wav | cut.wav (head/tail trimmed) |
+| 5.0 | `cut_transcript.py` | sentences.json + deletes | `5_shownotes/cut_transcript.json` |
+| 5.1 | *(agent reads cut_transcript + shownotes_example)* | cut_transcript.json + user template | `5_shownotes/shownotes.md` |
 
 All scripts are idempotent — re-running overwrites the previous output for that stage only.
 
