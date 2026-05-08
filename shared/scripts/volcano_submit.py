@@ -13,7 +13,8 @@ def _repo_root() -> Path:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--audio-url", required=True)
+    ap.add_argument("--audio-url", default=None)
+    ap.add_argument("--audio-file", default=None)
     ap.add_argument("--audio-format", default="wav")
     ap.add_argument("--ep-dir", required=True)
     ap.add_argument("--track-num", type=int, default=1)
@@ -27,10 +28,21 @@ def main() -> None:
     from lib.volcano_client import build_submit_headers, build_submit_payload, SUBMIT_URL
 
     cfg = load(env_path)
+
+    if args.audio_url and args.audio_file:
+        ap.error("Provide --audio-url or --audio-file, not both.")
+    if args.audio_url:
+        audio_url = args.audio_url
+    elif args.audio_file:
+        from lib.upload import select_uploader
+        audio_url = select_uploader(cfg).upload(Path(args.audio_file))
+    else:
+        ap.error("Either --audio-url or --audio-file is required.")
+
     task_id = str(uuid.uuid4())
     headers = build_submit_headers(cfg.volcano, task_id)
     payload = build_submit_payload(
-        audio_url=args.audio_url,
+        audio_url=audio_url,
         audio_format=args.audio_format,
         uid=args.uid,
         enable_speaker_info=(args.track_num == 0),
