@@ -1,57 +1,112 @@
 ---
 name: podcast-cut-剪播客
 description: |
-  将原始播客录音（单轨或双轨）自动转录、AI分析并裁剪为 cut.wav，供后期使用。
+  将原始播客录音（单轨或双轨）转录、AI分析、人工审查后裁剪为 cut.wav。
   触发词：剪播客、cut podcast、裁剪录音、处理录音
 ---
 
 # /podcast-cut-剪播客
 
-将录音转录、分析、人工审查后输出 cut.wav。整个流程分三步：
-1. 转录（自动）
-2. 分析（**你来做**）
-3. 剪辑（自动）
+按下面顺序逐步执行。每一步运行一个脚本，检查输出文件存在后再进入下一步。所有路径以仓库根目录为基准。
 
 ## 前提条件
 
-已运行 `/podcast-cut-安装`，且 `.env` 已配置：
+`.env` 已配置：
 - `VOLC_API_KEY`（或 `VOLC_APP_KEY` + `VOLC_ACCESS_KEY`）
 
-## 三步流程
+可选：`TOS_*` 或 `S3_*`（音频 > 50MB 时；否则回退到 uguu.se）
 
-### 第一步：转录
+## 工作目录
 
-```bash
-python shared/scripts/run_pipeline.py \
-  --ep-dir output/2026-05-08-ep01 \
-  --track1 recordings/host.wav \
-  --track2 recordings/guest.wav
-```
-
-流水线自动完成：
-- 1.0 音频准备
-- 1.05 轨道对齐（双轨时自动从 ASR 结果推断；可用 `--align clap` 或 `--align timestamp --t1 HH:MM:SS --t2 HH:MM:SS`）
-- 1.2 Volcano ASR 转录
-- 1.3 合并 + 1.4 分句
-- 2.0 生成分析上下文（`analysis_context.md`）
-
-结束时打印：**"Agent analysis required"**，并列出 `analysis_context.md` 路径。
+每一期录音用一个目录：`output/<EP_ID>/`，例如 `output/2026-05-08-ep01/`。下面用 `EP_DIR` 表示。
 
 ---
 
-### 第二步：你做分析（三轮）
+## 阶段 1：转录
 
-流水线结束后，读取打印出的 `analysis_context.md`，按以下三轮完成分析。
+### 1.0 准备音频
 
-#### 2.1 粗剪（内容级）
+```bash
+python shared/scripts/prepare_audio.py \
+  --ep-dir EP_DIR \
+  --track1 recordings/host.wav \
+  [--track2 recordings/guest.wav]
+```
 
-阅读 `analysis_context.md` 中的**剪辑规则**和**完整文本**，找出大段应删除的内容：
-- 录前/录后闲聊（主题开始前的内容）
-- 与主题完全无关的题外话（外卖、手机铃声、旁白）
-- 明显技术故障（麦克风调试、重录片段）
-- 时长超过3秒且无实质内容的停顿段
+输出：`EP_DIR/input/working_track*.wav`、`EP_DIR/input/audio_meta.json`
 
-将结果写入 `output/EP_DIR/2_analysis/rough_cuts.json`：
+### 1.05 双轨对齐（仅双轨需要，单轨跳过）
+
+三种模式，按可用信息选择：
+
+```bash
+# 拍掌模式：录音前 30s 内有同步拍掌
+python shared/scripts/align_tracks.py --ep-dir EP_DIR --clap
+
+# 时间戳模式：知道每轨的录制开始墙钟时间
+python shared/scripts/align_tracks.py --ep-dir EP_DIR --t1 10:00:00 --t2 10:00:03
+
+# 文字推断模式（默认，必须在 ASR 完成后运行）
+python shared/scripts/align_tracks.py --ep-dir EP_DIR
+```
+
+- **拍掌/时间戳模式**：在 1.2 ASR 之前运行
+- **文字推断模式**：在 1.2 ASR 完成后、1.3 合并之前运行
+
+输出：`EP_DIR/input/audio_meta.json` 中新增 `track_offsets_ms`
+
+### 1.2 Volcano ASR（每个 track 一组）
+
+```bash
+# Track 1
+python shared/scripts/volcano_submit.py --audio-file EP_DIR/input/working_track1.wav --track-num 1 --ep-dir EP_DIR
+python shared/scripts/volcano_query.py --track-num 1 --ep-dir EP_DIR
+
+# Track 2（如有）
+python shared/scripts/volcano_submit.py --audio-file EP_DIR/input/working_track2.wav --track-num 2 --ep-dir EP_DIR
+python shared/scripts/volcano_query.py --track-num 2 --ep-dir EP_DIR
+```
+
+输出：`EP_DIR/1_transcribe/task_id_track*.txt`、`EP_DIR/1_transcribe/volcano_raw_track*.json`
+
+注：`volcano_submit.py` 自动上传音频（TOS → S3 → uguu.se 链式回退）。
+
+### 1.3 合并多轨词流
+
+如果是文字推断对齐，**先**运行 1.05 文字推断模式，再运行这一步。
+
+```bash
+python shared/scripts/transcribe_merge.py --ep-dir EP_DIR
+```
+
+输出：`EP_DIR/1_transcribe/words.json`
+
+### 1.4 分句
+
+```bash
+python shared/scripts/make_sentences.py --ep-dir EP_DIR
+```
+
+输出：`EP_DIR/1_transcribe/sentences.json`
+
+---
+
+## 阶段 2：分析（**你来做**）
+
+不调用任何脚本。读取以下文件，自己进行分析：
+
+**输入**：
+- `EP_DIR/1_transcribe/sentences.json` — 完整句子列表（带词索引、时间戳、说话人）
+- `shared/rules/editing/*.md` — 剪辑规则（核心原则等）
+- `shared/rules/users/default/preferences.yaml` — 用户偏好（保守度、最大删除比等）
+
+按以下三轮，依次写入三个 JSON 文件：
+
+### 2.1 粗剪（内容级）→ `EP_DIR/2_analysis/rough_cuts.json`
+
+阅读规则和完整文本，找出大段应删除的内容：录前/录后闲聊、与主题完全无关的题外话、明显技术故障（麦克风调试、重录）、超过 3 秒且无实质内容的停顿。
+
+格式：
 
 ```json
 {
@@ -68,16 +123,15 @@ python shared/scripts/run_pipeline.py \
 }
 ```
 
-规则优先级：保守原则优先，宁可少删不要误删（`confidence` < 0.7 的不放入）。
+保守原则：宁可少删不要误删（confidence < 0.7 的不放入）。
 
-#### 2.2 精剪（词/句级）
+### 2.2 精剪（词/句级）→ `EP_DIR/2_analysis/fine_cuts.json`
 
-在粗剪标记的区间之外，逐句检查仍需删除的细节：
-- 高频口头禅（"嗯"、"啊"、"对对对"、"然后然后然后"）
-- 同一观点30秒内用几乎相同措辞重复，删去重复
-- "怎么说呢"、"就是那种"等开头无实质内容的句子
+在粗剪标记的区间之外，逐句检查：高频口头禅（"嗯"、"啊"、"对对对"、"然后然后然后"）、30 秒内几乎相同措辞的重复、"怎么说呢"等开头无实质内容的句子。
 
-将结果写入 `output/EP_DIR/2_analysis/fine_cuts.json`：
+不删除：情感停顿、自然思考停顿（<1.5s）、短时对话节奏词（"对"/"嗯嗯" <1s）、故意强调的重复。
+
+格式：
 
 ```json
 {
@@ -94,15 +148,9 @@ python shared/scripts/run_pipeline.py \
 }
 ```
 
-**不删除**：情感停顿、自然思考停顿（<1.5s）、短时对话节奏词（"对"/"嗯嗯" <1s）、故意强调的重复。
+### 2.3 自审 → `EP_DIR/2_analysis/self_review.json`
 
-#### 2.3 自审
-
-回顾粗剪和精剪建议，检查：
-- 有无误删（false positive）——不该删的被删了？
-- 有无遗漏（false negative）——应该删的没删？
-
-将结果写入 `output/EP_DIR/2_analysis/self_review.json`：
+回顾 2.1 + 2.2 的建议，检查误删（false positive）和遗漏（false negative）：
 
 ```json
 {
@@ -124,61 +172,76 @@ python shared/scripts/run_pipeline.py \
       "reason": "误判为题外话，实为对主题的铺垫"
     }
   ],
-  "summary": "共审查23条建议，标记1条误删（30-75s），补充1条遗漏（180-182s）"
+  "summary": "共审查 23 条建议，标记 1 条误删，补充 1 条遗漏"
 }
 ```
 
-三个文件写完后，运行第三步。
+---
+
+## 阶段 3：人工审查
+
+### 3.0 生成审查 HTML
+
+```bash
+python shared/scripts/generate_review_html.py --ep-dir EP_DIR
+```
+
+输出：`EP_DIR/3_review/review_enhanced.html`
+
+### 3.1 启动审查服务器
+
+```bash
+python shared/scripts/review_server.py --ep-dir EP_DIR --port 5050
+```
+
+告诉用户：在浏览器打开打印出的 review_enhanced.html 路径，审查删除建议（保留 / 编辑 / 拒绝 / 新增），完成后点击 Export。
+
+等待用户告知"审查完毕"，或检查 `EP_DIR/3_review/delete_segments_edited.json` 文件是否已生成。
 
 ---
 
-### 第三步：生成审查界面 + 剪辑
+## 阶段 4：剪辑
+
+### 4.0 切割音频
 
 ```bash
-python shared/scripts/run_pipeline.py --ep-dir output/2026-05-08-ep01 --resume
+python shared/scripts/cut_audio.py --ep-dir EP_DIR
 ```
 
-流水线自动：
-- 生成 `review_enhanced.html`（含所有删除建议）
-- 打印：启动审查服务器的命令，等待人工审查
+输出：`EP_DIR/4_cut/cut.wav`（含 25ms 交叉淡入淡出）
 
-人工审查：
+### 4.1 修剪头尾静音
 
 ```bash
-python shared/scripts/review_server.py --ep-dir output/2026-05-08-ep01 --port 5050
-# 浏览器打开打印出的 review_enhanced.html 路径
-# 审查建议删除内容，点击 Export → 自动保存 delete_segments_edited.json
+python shared/scripts/trim_silences.py --ep-dir EP_DIR
 ```
 
-审查完成后再次运行：
+最终输出：`EP_DIR/4_cut/cut.wav`（已修剪头尾）
+
+---
+
+## 续传与幂等
+
+每个脚本输出唯一文件。如需重跑某阶段，先删掉对应输出文件再重新运行。例如：
 
 ```bash
-python shared/scripts/run_pipeline.py --ep-dir output/2026-05-08-ep01 --resume
+# 重跑分析（保留转录结果）
+rm -rf EP_DIR/2_analysis EP_DIR/3_review EP_DIR/4_cut
+
+# 重跑切割（保留所有分析）
+rm -rf EP_DIR/4_cut
 ```
 
-输出：`output/2026-05-08-ep01/4_cut/cut.wav`
-
-## 重新运行与续传
-
-每个阶段检测输出是否已存在，已完成的阶段自动跳过。在任意阶段中断后重新运行即可续传。
-
-若需重跑分析，删除 `2_analysis/` 目录后重新运行流水线：
-
-```bash
-rm -rf output/EP_DIR/2_analysis
-python shared/scripts/run_pipeline.py --ep-dir output/EP_DIR
-```
+中断后续传：直接从未完成的步骤继续运行，前面的脚本不会重做（因为输出已存在，由你判断跳过）。
 
 ## 常见错误
 
 | 错误 | 原因 | 处理 |
 |------|------|------|
-| Volcano `45000001` | API key 无效 | 检查 `.env` 中的 Volcano 配置 |
+| Volcano `45000001` | API key 无效 | 检查 `.env` 中的 `VOLC_API_KEY` |
 | Volcano `45000132` | 音频超 512 MB | 先用 ffmpeg 转为 16kHz mono mp3 |
 | uguu.se 上传失败 | 文件过大或网络问题 | 重试，或配置 TOS/S3 |
 | `silence trap` | 输出几乎全静音 | 检查输入文件是否包含有效音频 |
-| `Agent analysis not complete` | 三个分析 JSON 尚未写入 | 按第二步写完三个文件后再 `--resume` |
-| `delete_segments_edited.json not found` | 审查未完成 | 在浏览器中点击 Export 后再 `--resume` |
 
 ## 各阶段详情
 

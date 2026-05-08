@@ -54,7 +54,7 @@ cp .env.example .env
 ### 6. Verify the installation
 
 ```bash
-python -m pytest          # 105 tests — all should pass
+python -m pytest          # 89 tests — all should pass
 bash shared/scripts/install/check_deps.sh   # checks ffmpeg + python versions
 ```
 
@@ -78,28 +78,32 @@ Required variables at minimum:
 
 ## Quick Start
 
+The agent (Claude Code, Codex CLI) drives the workflow by following SKILL.md. Stages run as individual scripts:
+
 ```bash
-# Step 1: Transcription (automatic, ~5–20 min)
-python shared/scripts/run_pipeline.py \
-  --ep-dir output/2026-05-08-ep01 \
-  --track1 recordings/host.wav \
-  --track2 recordings/guest.wav
+# Stage 1: Transcribe (~5–20 min)
+python shared/scripts/prepare_audio.py --ep-dir output/2026-05-08-ep01 --track1 recordings/host.wav --track2 recordings/guest.wav
+python shared/scripts/volcano_submit.py --audio-file output/2026-05-08-ep01/input/working_track1.wav --track-num 1 --ep-dir output/2026-05-08-ep01
+python shared/scripts/volcano_query.py --track-num 1 --ep-dir output/2026-05-08-ep01
+# ...repeat submit/query for track 2 if dual-track...
+python shared/scripts/transcribe_merge.py --ep-dir output/2026-05-08-ep01
+python shared/scripts/make_sentences.py --ep-dir output/2026-05-08-ep01
 
-# Step 2: Agent analysis
-# Read output/2026-05-08-ep01/2_analysis/analysis_context.md
-# Write rough_cuts.json, fine_cuts.json, self_review.json
-# (See SKILL.md for detailed instructions)
+# Stage 2: Agent reads sentences.json + rules, writes rough/fine/self_review JSON
+# (See SKILL.md for instructions and JSON formats)
 
-# Step 3a: Resume after analysis → generates review HTML
-python shared/scripts/run_pipeline.py --ep-dir output/2026-05-08-ep01 --resume
-# Review in browser — see SKILL.md for review_server.py command
+# Stage 3: Review
+python shared/scripts/generate_review_html.py --ep-dir output/2026-05-08-ep01
+python shared/scripts/review_server.py --ep-dir output/2026-05-08-ep01 --port 5050
+# Open the printed HTML, review, click Export
 
-# Step 3b: Resume after human review → cut.wav
-python shared/scripts/run_pipeline.py --ep-dir output/2026-05-08-ep01 --resume
-# Result: output/2026-05-08-ep01/4_cut/cut.wav
+# Stage 4: Cut
+python shared/scripts/cut_audio.py --ep-dir output/2026-05-08-ep01
+python shared/scripts/trim_silences.py --ep-dir output/2026-05-08-ep01
+# Output: output/2026-05-08-ep01/4_cut/cut.wav
 ```
 
-For alignment options, troubleshooting, and per-stage details, see [docs/剪播客/快速上手.md](docs/剪播客/快速上手.md).
+For details (alignment options, error codes, the analysis JSON formats), see `.claude/skills/podcast-cut-剪播客/SKILL.md` or `docs/剪播客/快速上手.md`.
 
 ## Stage Pipeline
 
@@ -111,8 +115,7 @@ For alignment options, troubleshooting, and per-stage details, see [docs/剪播�
 | 1.2b | `volcano_query.py` | Task ID | `volcano_raw_track*.json` |
 | 1.3 | `transcribe_merge.py` | volcano_raw × n | `words.json` |
 | 1.4 | `make_sentences.py` | words.json | `sentences.json` |
-| 2.0 | `build_analysis_context.py` | sentences.json + rules | `analysis_context.md` |
-| 2.1–2.3 | *(agent)* | analysis_context.md | `rough_cuts.json`, `fine_cuts.json`, `self_review.json` |
+| 2.1–2.3 | *(agent reads sentences.json + rules)* | sentences.json + rules | `rough_cuts.json`, `fine_cuts.json`, `self_review.json` |
 | 3.0 | `generate_review_html.py` + `review_server.py` | analysis | `review_enhanced.html` |
 | 3.1 | (browser, manual) | — | `delete_segments_edited.json` |
 | 4.0 | `cut_audio.py` | working WAV + delete_segments_edited | `cut.wav` |
@@ -138,7 +141,7 @@ podcast-cutter-skills/
 │   │   ├── editing/          # LLM editing rules (Chinese Markdown, concatenated as system prompt)
 │   │   └── users/default/    # Default user preferences (preferences.yaml, hotwords.txt)
 │   └── test_fixtures/        # Audio fixtures used by the test suite
-├── tests/                    # pytest suite (96 tests)
+├── tests/                    # pytest suite (89 tests)
 │   ├── lib/                  # Tests for lib/ modules
 │   ├── scripts/              # Tests for each pipeline script
 │   └── install/              # Tests for install scripts
