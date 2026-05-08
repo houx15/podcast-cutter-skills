@@ -39,18 +39,12 @@ def _empty_cfg(backend: str = "uguu") -> config.Config:
         if backend == "s3"
         else None
     )
-    llm = config.LLMConfig(
-        api_key="ark-test",
-        base_url="https://ark.example.com/api/v3",
-        model="doubao-test",
-    )
     return config.Config(
         volcano=volcano,
         tos=tos,
         s3=s3,
         gemini_api_key=None,
         upload_backend=backend,  # type: ignore[arg-type]
-        llm=llm,
     )
 
 

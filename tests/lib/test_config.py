@@ -8,19 +8,11 @@ import pytest
 from shared.scripts.lib import config
 
 
-LLM_KEYS = (
-    "LLM_API_KEY=ark-test\n"
-    "LLM_BASE_URL=https://ark.example.com/api/v3\n"
-    "LLM_MODEL=doubao-test\n"
-)
-
-
 def test_load_picks_new_console_api_key(tmp_path: Path) -> None:
     env = tmp_path / ".env"
     env.write_text(
         "VOLC_API_KEY=newkey\n"
         "VOLC_RESOURCE_ID=volc.seedasr.auc\n"
-        + LLM_KEYS
     )
     cfg = config.load(env_path=env)
     assert cfg.volcano.api_key == "newkey"
@@ -35,7 +27,6 @@ def test_load_picks_old_console_when_only_pair_present(tmp_path: Path) -> None:
         "VOLC_APP_KEY=appid\n"
         "VOLC_ACCESS_KEY=token\n"
         "VOLC_RESOURCE_ID=volc.seedasr.auc\n"
-        + LLM_KEYS
     )
     cfg = config.load(env_path=env)
     assert cfg.volcano.console == "old"
@@ -52,7 +43,6 @@ def test_load_prefers_new_when_both_present(tmp_path: Path) -> None:
         "VOLC_APP_KEY=appid\n"
         "VOLC_ACCESS_KEY=token\n"
         "VOLC_RESOURCE_ID=volc.seedasr.auc\n"
-        + LLM_KEYS
     )
     cfg = config.load(env_path=env)
     assert cfg.volcano.console == "new"
@@ -61,7 +51,7 @@ def test_load_prefers_new_when_both_present(tmp_path: Path) -> None:
 
 def test_load_raises_when_no_volcano_creds(tmp_path: Path) -> None:
     env = tmp_path / ".env"
-    env.write_text("VOLC_RESOURCE_ID=volc.seedasr.auc\n" + LLM_KEYS)
+    env.write_text("VOLC_RESOURCE_ID=volc.seedasr.auc\n")
     with pytest.raises(config.ConfigError) as exc:
         config.load(env_path=env)
     assert "VOLC_API_KEY" in str(exc.value)
@@ -73,7 +63,6 @@ def test_load_raises_when_old_console_pair_incomplete(tmp_path: Path) -> None:
         "VOLC_APP_KEY=appid\n"
         "VOLC_RESOURCE_ID=volc.seedasr.auc\n"
         # missing VOLC_ACCESS_KEY
-        + LLM_KEYS
     )
     with pytest.raises(config.ConfigError) as exc:
         config.load(env_path=env)
@@ -86,7 +75,6 @@ def test_upload_backend_is_tos_when_tos_keys_present(tmp_path: Path) -> None:
         "VOLC_API_KEY=newkey\nVOLC_RESOURCE_ID=volc.seedasr.auc\n"
         "TOS_ACCESS_KEY=ak\nTOS_SECRET_KEY=sk\n"
         "TOS_BUCKET=b\nTOS_ENDPOINT=https://tos.example\n"
-        + LLM_KEYS
     )
     cfg = config.load(env_path=env)
     assert cfg.upload_backend == "tos"
@@ -98,7 +86,6 @@ def test_upload_backend_is_s3_when_only_s3_keys_present(tmp_path: Path) -> None:
         "VOLC_API_KEY=newkey\nVOLC_RESOURCE_ID=volc.seedasr.auc\n"
         "S3_ENDPOINT=https://r2.example\nS3_BUCKET=b\n"
         "S3_ACCESS_KEY=ak\nS3_SECRET_KEY=sk\n"
-        + LLM_KEYS
     )
     cfg = config.load(env_path=env)
     assert cfg.upload_backend == "s3"
@@ -106,7 +93,7 @@ def test_upload_backend_is_s3_when_only_s3_keys_present(tmp_path: Path) -> None:
 
 def test_upload_backend_is_uguu_when_no_storage_keys(tmp_path: Path) -> None:
     env = tmp_path / ".env"
-    env.write_text("VOLC_API_KEY=newkey\nVOLC_RESOURCE_ID=volc.seedasr.auc\n" + LLM_KEYS)
+    env.write_text("VOLC_API_KEY=newkey\nVOLC_RESOURCE_ID=volc.seedasr.auc\n")
     cfg = config.load(env_path=env)
     assert cfg.upload_backend == "uguu"
 
@@ -117,22 +104,3 @@ def test_load_missing_env_file_raises(tmp_path: Path) -> None:
     assert "not found" in str(exc.value).lower()
 
 
-def test_llm_config_loaded(tmp_path):
-    env = tmp_path / ".env"
-    env.write_text(
-        "VOLC_API_KEY=testkey\n"
-        "LLM_API_KEY=ark-test\n"
-        "LLM_BASE_URL=https://ark.example.com/api/v3\n"
-        "LLM_MODEL=doubao-test\n"
-    )
-    cfg = config.load(env_path=env)
-    assert cfg.llm.api_key == "ark-test"
-    assert cfg.llm.base_url == "https://ark.example.com/api/v3"
-    assert cfg.llm.model == "doubao-test"
-
-
-def test_llm_config_missing_key_raises(tmp_path):
-    env = tmp_path / ".env"
-    env.write_text("VOLC_API_KEY=testkey\nLLM_BASE_URL=https://x\nLLM_MODEL=m\n")
-    with pytest.raises(config.ConfigError, match="LLM_API_KEY"):
-        config.load(env_path=env)
