@@ -46,13 +46,23 @@ class _S3LikeUploader:
         access_key: str,
         secret_key: str,
         region: str = "auto",
+        addressing_style: str | None = None,
     ) -> None:
+        if not endpoint.startswith(("http://", "https://")):
+            endpoint = f"https://{endpoint}"
+        from botocore.config import Config as _BotoConfig
+
+        boto_cfg_kwargs: dict[str, object] = {"signature_version": "s3v4"}
+        if addressing_style:
+            boto_cfg_kwargs["s3"] = {"addressing_style": addressing_style}
+
         self._client = _boto3_client(
             "s3",
             endpoint_url=endpoint,
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             region_name=region,
+            config=_BotoConfig(**boto_cfg_kwargs),
         )
         self._bucket = bucket
 
@@ -78,13 +88,37 @@ class _S3LikeUploader:
             raise UploadError(f"presign failed: {exc}") from exc
 
 
+def _normalize_tos_endpoint(endpoint: str) -> str:
+    """Volcano TOS exposes two endpoints per region:
+       - tos-{region}.volces.com         (native TOS protocol)
+       - tos-s3-{region}.volces.com      (S3-compatible protocol — what boto3 needs)
+    Users naturally paste the bucket-domain endpoint (no `s3-`); we promote it.
+    """
+    e = endpoint.replace("https://", "").replace("http://", "")
+    if e.startswith("tos-") and not e.startswith("tos-s3-") and ".volces.com" in e:
+        return f"https://tos-s3-{e[len('tos-'):]}"
+    return endpoint
+
+
+def _region_from_tos_endpoint(endpoint: str) -> str:
+    e = endpoint.replace("https://", "").replace("http://", "")
+    if e.startswith("tos-s3-") and ".volces.com" in e:
+        return e[len("tos-s3-"):].split(".", 1)[0]
+    if e.startswith("tos-") and ".volces.com" in e:
+        return e[len("tos-"):].split(".", 1)[0]
+    return "auto"
+
+
 class TOSUploader(_S3LikeUploader):
     def __init__(self, cfg: TOSConfig) -> None:
+        endpoint = _normalize_tos_endpoint(cfg.endpoint)
         super().__init__(
-            endpoint=cfg.endpoint,
+            endpoint=endpoint,
             bucket=cfg.bucket,
             access_key=cfg.access_key,
             secret_key=cfg.secret_key,
+            region=_region_from_tos_endpoint(endpoint),
+            addressing_style="virtual",
         )
 
 
