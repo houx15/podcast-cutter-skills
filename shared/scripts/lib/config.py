@@ -44,12 +44,20 @@ class S3Config:
 
 
 @dataclass(frozen=True)
+class LLMConfig:
+    api_key: str
+    base_url: str
+    model: str
+
+
+@dataclass(frozen=True)
 class Config:
     volcano: VolcanoConfig
     tos: Optional[TOSConfig]
     s3: Optional[S3Config]
     gemini_api_key: Optional[str]
     upload_backend: Literal["tos", "s3", "uguu"]
+    llm: LLMConfig
 
 
 def _nonempty(d: dict[str, str | None], key: str) -> Optional[str]:
@@ -66,6 +74,7 @@ def load(env_path: Path) -> Config:
     volcano = _build_volcano(raw)
     tos = _build_tos(raw)
     s3 = _build_s3(raw)
+    llm = _build_llm(raw)
     upload_backend: Literal["tos", "s3", "uguu"] = (
         "tos" if tos else "s3" if s3 else "uguu"
     )
@@ -76,6 +85,7 @@ def load(env_path: Path) -> Config:
         s3=s3,
         gemini_api_key=_nonempty(raw, "GEMINI_API_KEY"),
         upload_backend=upload_backend,
+        llm=llm,
     )
 
 
@@ -135,3 +145,14 @@ def _build_s3(raw: dict[str, str | None]) -> Optional[S3Config]:
             region=_nonempty(raw, "S3_REGION") or "auto",
         )
     return None
+
+
+def _build_llm(raw: dict[str, str | None]) -> LLMConfig:
+    for key in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
+        if not _nonempty(raw, key):
+            raise ConfigError(key)
+    return LLMConfig(
+        api_key=raw["LLM_API_KEY"],  # type: ignore[arg-type]
+        base_url=raw["LLM_BASE_URL"],  # type: ignore[arg-type]
+        model=raw["LLM_MODEL"],  # type: ignore[arg-type]
+    )
