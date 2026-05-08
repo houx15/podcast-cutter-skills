@@ -141,8 +141,12 @@ def main() -> None:
     # Read rules
     rules_text = _load_rules(rules_dir)
 
-    # Read prefs (raw YAML text)
-    prefs_text = prefs_file.read_text(encoding="utf-8")
+    # Read prefs (raw YAML text); fall back gracefully if file is absent
+    prefs_text = (
+        prefs_file.read_text(encoding="utf-8")
+        if prefs_file.exists()
+        else "(preferences not found)"
+    )
 
     # Format sentences block
     sentences_text = _format_sentences(sentences)

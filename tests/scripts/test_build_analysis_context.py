@@ -28,7 +28,6 @@ def _setup(tmp_path):
     ep = tmp_path / "ep"
     td = ep / "1_transcribe"
     td.mkdir(parents=True)
-    (ep / "2_analysis").mkdir(parents=True)
 
     sentences = {
         "sentences": [
@@ -101,7 +100,6 @@ def test_contains_output_format_spec(tmp_path):
 def test_missing_sentences_raises(tmp_path):
     ep = tmp_path / "ep"
     (ep / "1_transcribe").mkdir(parents=True)
-    (ep / "2_analysis").mkdir(parents=True)
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
     prefs_dir = tmp_path / "prefs"
@@ -120,8 +118,52 @@ def test_missing_sentences_raises(tmp_path):
             str(prefs_dir / "preferences.yaml"),
         ],
     ):
-        with pytest.raises((FileNotFoundError, SystemExit)):
+        with pytest.raises(FileNotFoundError):
             mod.main()
+
+
+def test_empty_rules_dir(tmp_path):
+    ep, _, prefs_dir = _setup(tmp_path)
+    empty_rules = tmp_path / "empty_rules"
+    empty_rules.mkdir()
+    mod = _load()
+    with unittest.mock.patch(
+        "sys.argv",
+        [
+            "build_analysis_context.py",
+            "--ep-dir",
+            str(ep),
+            "--rules-dir",
+            str(empty_rules),
+            "--prefs-file",
+            str(prefs_dir / "preferences.yaml"),
+        ],
+    ):
+        mod.main()  # must not raise
+
+    assert (ep / "2_analysis" / "analysis_context.md").exists()
+
+
+def test_missing_prefs_file(tmp_path):
+    ep, rules_dir, _ = _setup(tmp_path)
+    nonexistent_prefs = tmp_path / "no_such_prefs.yaml"
+    mod = _load()
+    with unittest.mock.patch(
+        "sys.argv",
+        [
+            "build_analysis_context.py",
+            "--ep-dir",
+            str(ep),
+            "--rules-dir",
+            str(rules_dir),
+            "--prefs-file",
+            str(nonexistent_prefs),
+        ],
+    ):
+        mod.main()  # must not raise
+
+    text = (ep / "2_analysis" / "analysis_context.md").read_text()
+    assert "(preferences not found)" in text
 
 
 def test_default_rules_and_prefs_paths(tmp_path):
