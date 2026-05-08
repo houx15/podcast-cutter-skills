@@ -1,6 +1,6 @@
 # podcast-cutter-skills
 
-A Python toolkit for cutting Chinese podcast episodes with AI assistance. Raw dual-track recordings go in; a clean, sample-accurate `cut.wav` comes out. The pipeline covers audio preparation, Volcano Engine v3 AUC ASR transcription, three rounds of LLM analysis (rough cut, fine cut, self-review), browser-based human review, and precise ffmpeg splicing with 25 ms crossfades.
+A Python toolkit for cutting Chinese podcast episodes with AI assistance. Raw dual-track recordings go in; a clean, sample-accurate `cut.wav` comes out. The pipeline covers audio preparation, Volcano Engine v3 AUC ASR transcription, agent-driven analysis (rough cut, fine cut, self-review), browser-based human review, and precise ffmpeg splicing with 25 ms crossfades.
 
 ## Installation
 
@@ -31,18 +31,12 @@ pip install -e ".[dev]"
 
 ### 4. Get API keys
 
-You need two services:
+You need one service (plus optional storage):
 
 **Volcano Engine ASR** (transcription)
 - Sign up at [console.volcengine.com](https://console.volcengine.com/)
 - Go to **Speech → API Keys** and create a key → `VOLC_API_KEY`
 - Enable the `volc.seedasr.auc` resource (Chinese big-model ASR)
-
-**ByteDance Ark** (LLM analysis)
-- Sign up at [console.volcengine.com/ark](https://console.volcengine.com/ark)
-- Create an API key → `LLM_API_KEY`
-- Note the endpoint: `https://ark.cn-beijing.volces.com/api/v3`
-- Deploy or use an existing doubao model → `LLM_MODEL`
 
 **Audio upload** (optional — needed for files > ~50 MB)
 - Volcano TOS bucket (`TOS_*`) or any S3-compatible storage (`S3_*`)
@@ -54,7 +48,7 @@ See [docs/configuration.md](docs/configuration.md) for the full variable referen
 
 ```bash
 cp .env.example .env
-# Edit .env and fill in VOLC_API_KEY, LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+# Edit .env and fill in VOLC_API_KEY (and VOLC_RESOURCE_ID if needed)
 ```
 
 ### 6. Verify the installation
@@ -71,7 +65,7 @@ bash shared/scripts/install/check_deps.sh   # checks ffmpeg + python versions
 The scripts load `.env` via `python-dotenv`, which checks **shell environment variables first**, then falls back to the `.env` file. This means:
 
 - **Local agents** (Claude Code, Codex CLI, Gemini CLI): create `.env` once in the repo root — every agent running in that directory picks it up automatically.
-- **Remote / cloud agents**: set `VOLC_API_KEY`, `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` as environment variables in the agent's runtime config (e.g., GitHub Actions secrets, Cowork env vars). No `.env` file needed.
+- **Remote / cloud agents**: set `VOLC_API_KEY` as environment variables in the agent's runtime config (e.g., GitHub Actions secrets, Cowork env vars). No `.env` file needed.
 
 Required variables at minimum:
 
@@ -79,26 +73,28 @@ Required variables at minimum:
 |----------|---------|
 | `VOLC_API_KEY` | Volcano Engine ASR authentication |
 | `VOLC_RESOURCE_ID` | Set to `volc.seedasr.auc` |
-| `LLM_API_KEY` | ByteDance Ark LLM authentication |
-| `LLM_BASE_URL` | `https://ark.cn-beijing.volces.com/api/v3` |
-| `LLM_MODEL` | Doubao model name (e.g. `doubao-seed-2-0-code-preview-260215`) |
 
 ---
 
 ## Quick Start
 
 ```bash
-# Run the pipeline (transcription + analysis, ~5–20 min)
+# Step 1: Transcription (automatic, ~5–20 min)
 python shared/scripts/run_pipeline.py \
   --ep-dir output/2026-05-08-ep01 \
   --track1 recordings/host.wav \
   --track2 recordings/guest.wav
 
-# Review in browser (the pipeline prints the server command and HTML path)
-python shared/scripts/review_server.py --ep-dir output/2026-05-08-ep01 --port 5050
-# Open the printed review_enhanced.html, review cuts, click Export
+# Step 2: Agent analysis
+# Read output/2026-05-08-ep01/2_analysis/analysis_context.md
+# Write rough_cuts.json, fine_cuts.json, self_review.json
+# (See SKILL.md for detailed instructions)
 
-# Finish the cut
+# Step 3a: Resume after analysis → generates review HTML
+python shared/scripts/run_pipeline.py --ep-dir output/2026-05-08-ep01 --resume
+# Review in browser — see SKILL.md for review_server.py command
+
+# Step 3b: Resume after human review → cut.wav
 python shared/scripts/run_pipeline.py --ep-dir output/2026-05-08-ep01 --resume
 # Result: output/2026-05-08-ep01/4_cut/cut.wav
 ```
@@ -115,9 +111,8 @@ For alignment options, troubleshooting, and per-stage details, see [docs/剪播�
 | 1.2b | `volcano_query.py` | Task ID | `volcano_raw_track*.json` |
 | 1.3 | `transcribe_merge.py` | volcano_raw × n | `words.json` |
 | 1.4 | `make_sentences.py` | words.json | `sentences.json` |
-| 2.1 | `analyze_rough.py` | sentences + rules | `rough_cuts.json` |
-| 2.2 | `analyze_fine.py` | sentences + words + rough | `fine_cuts.json` |
-| 2.3 | `self_review.py` | rough + fine + sentences | `self_review.json` |
+| 2.0 | `build_analysis_context.py` | sentences.json + rules | `analysis_context.md` |
+| 2.1–2.3 | *(agent)* | analysis_context.md | `rough_cuts.json`, `fine_cuts.json`, `self_review.json` |
 | 3.0 | `generate_review_html.py` + `review_server.py` | analysis | `review_enhanced.html` |
 | 3.1 | (browser, manual) | — | `delete_segments_edited.json` |
 | 4.0 | `cut_audio.py` | working WAV + delete_segments_edited | `cut.wav` |

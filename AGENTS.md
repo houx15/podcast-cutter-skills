@@ -4,20 +4,26 @@
 
 ## Guidelines
 
-This is a **Chinese podcast editing toolkit**. It turns raw recordings into a clean `cut.wav` via ASR transcription, LLM analysis, and human review.
+This is a **Chinese podcast editing toolkit**. It turns raw recordings into a clean `cut.wav` via ASR transcription, agent analysis, and human review.
 
 ### Entry point for running a podcast episode
 
 The primary interface is `run_pipeline.py`:
 
 ```bash
-# Stage 1–3 (transcription + analysis + review HTML):
+# Step 1: Transcription (automatic — runs stages 1.x):
 python shared/scripts/run_pipeline.py \
   --ep-dir output/EP_ID \
   --track1 recordings/host.wav \
   [--track2 recordings/guest.wav]
 
-# Stage 4 (cut audio, after human review):
+# Step 2: Agent analysis — read analysis_context.md, write rough_cuts.json,
+#   fine_cuts.json, self_review.json (see SKILL.md for details)
+
+# Step 3a: Resume after analysis → generates review HTML:
+python shared/scripts/run_pipeline.py --ep-dir EP_DIR --resume
+
+# Step 3b: Resume after human review → cut.wav:
 python shared/scripts/run_pipeline.py --ep-dir EP_DIR --resume
 ```
 
@@ -27,9 +33,9 @@ The pipeline skips stages whose output already exists — safe to re-run or resu
 
 - `shared/scripts/run_pipeline.py` — orchestrates all stages
 - `shared/scripts/lib/` — config, ffmpeg_wrap, volcano_client, upload, json_io, audio_constants
-- `shared/rules/editing/` — LLM editing rules (Chinese Markdown)
+- `shared/rules/editing/` — editing rules (Chinese Markdown, used by agent analysis)
 - `shared/rules/users/default/` — user preferences YAML + hotwords.txt
-- `.env` — API keys (Volcano ASR + ByteDance Ark LLM); never commit this file
+- `.env` — API keys (Volcano ASR only); never commit this file
 
 ### Stage outputs (per-episode directory `output/<ep-id>/`)
 
@@ -39,9 +45,10 @@ The pipeline skips stages whose output already exists — safe to re-run or resu
 | `input/track_offsets_ms` (in audio_meta.json) | align_tracks.py |
 | `1_transcribe/words.json` | transcribe_merge.py |
 | `1_transcribe/sentences.json` | make_sentences.py |
-| `2_analysis/rough_cuts.json` | analyze_rough.py |
-| `2_analysis/fine_cuts.json` | analyze_fine.py |
-| `2_analysis/self_review.json` | self_review.py |
+| `2_analysis/analysis_context.md` | build_analysis_context.py |
+| `2_analysis/rough_cuts.json` | **Agent** (reads analysis_context.md) |
+| `2_analysis/fine_cuts.json` | **Agent** (reads analysis_context.md) |
+| `2_analysis/self_review.json` | **Agent** (reads analysis_context.md) |
 | `3_review/review_enhanced.html` | generate_review_html.py |
 | `3_review/delete_segments_edited.json` | review_server.py (POST /export) |
 | `4_cut/cut.wav` | cut_audio.py + trim_silences.py |
