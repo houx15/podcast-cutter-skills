@@ -38,7 +38,11 @@ def main() -> None:
     )
     resp = requests.post(SUBMIT_URL, headers=headers, json=payload, timeout=30)
     resp.raise_for_status()
-    returned_task_id = resp.json()["resp"]["task_id"]
+    data = resp.json()
+    try:
+        returned_task_id = data["resp"]["task_id"]
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError(f"Volcano submit response missing 'task_id': {data}") from exc
 
     ep_dir = Path(args.ep_dir)
     out_dir = ep_dir / "1_transcribe"
@@ -47,4 +51,5 @@ def main() -> None:
     print(returned_task_id)
 
 
-main()
+if __name__ == "__main__":
+    main()

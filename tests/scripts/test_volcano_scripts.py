@@ -27,6 +27,7 @@ def test_submit_writes_task_id(tmp_path):
             "--env", f"{REPO}/.env",
         ]
         spec.loader.exec_module(mod)
+        mod.main()
 
     task_file = tmp_path / "1_transcribe" / "task_id_track1.txt"
     assert task_file.exists()
@@ -67,6 +68,7 @@ def test_query_writes_raw_json(tmp_path):
             "--max-attempts", "3",
         ]
         spec.loader.exec_module(mod)
+        mod.main()
 
     raw = json.loads((task_dir / "volcano_raw_track1.json").read_text())
     assert "resp" in raw

@@ -29,7 +29,12 @@ def main() -> None:
 
     cfg = load(env_path)
     ep_dir = Path(args.ep_dir)
-    task_id = (ep_dir / "1_transcribe" / f"task_id_track{args.track_num}.txt").read_text().strip()
+    task_id_file = ep_dir / "1_transcribe" / f"task_id_track{args.track_num}.txt"
+    if not task_id_file.exists():
+        raise FileNotFoundError(
+            f"Task ID file not found: {task_id_file}. Run volcano_submit.py first."
+        )
+    task_id = task_id_file.read_text().strip()
 
     for attempt in range(args.max_attempts):
         headers = build_query_headers(cfg.volcano, task_id)
@@ -52,4 +57,5 @@ def main() -> None:
     raise TimeoutError(f"Volcano task {task_id} did not complete in {args.max_attempts} attempts")
 
 
-main()
+if __name__ == "__main__":
+    main()
