@@ -14,7 +14,7 @@ from typing import Any, Protocol
 
 import requests
 
-from shared.scripts.lib.config import Config, S3Config, TOSConfig
+from .config import Config, S3Config, TOSConfig
 
 UGUU_ENDPOINT = "https://uguu.se/upload"
 PRESIGN_EXPIRES_SECONDS = 3600

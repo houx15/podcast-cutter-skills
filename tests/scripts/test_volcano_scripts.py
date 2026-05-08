@@ -13,20 +13,21 @@ def test_submit_writes_task_id(tmp_path):
     fake_resp.json.return_value = {"resp": {"task_id": "fake-task-123"}}
     fake_resp.raise_for_status = MagicMock()
 
-    with patch("requests.post", return_value=fake_resp):
-        import importlib.util, sys as _sys
-        spec = importlib.util.spec_from_file_location(
-            "volcano_submit_test", f"{REPO}/shared/scripts/volcano_submit.py")
-        mod = importlib.util.module_from_spec(spec)
-        _sys.argv = [
-            "volcano_submit.py",
-            "--audio-url", "https://example.com/audio.wav",
-            "--audio-format", "wav",
-            "--ep-dir", str(tmp_path),
-            "--track-num", "1",
-            "--env", f"{REPO}/.env",
-        ]
-        spec.loader.exec_module(mod)
+    import importlib.util, sys as _sys
+    spec = importlib.util.spec_from_file_location(
+        "volcano_submit_test", f"{REPO}/shared/scripts/volcano_submit.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    with patch("requests.post", return_value=fake_resp), \
+         patch("sys.argv", [
+             "volcano_submit.py",
+             "--audio-url", "https://example.com/audio.wav",
+             "--audio-format", "wav",
+             "--ep-dir", str(tmp_path),
+             "--track-num", "1",
+             "--env", f"{REPO}/.env",
+         ]):
         mod.main()
 
     task_file = tmp_path / "1_transcribe" / "task_id_track1.txt"
@@ -54,20 +55,21 @@ def test_query_writes_raw_json(tmp_path):
     }
     fake_resp.raise_for_status = MagicMock()
 
-    with patch("requests.post", return_value=fake_resp):
-        import importlib.util, sys as _sys
-        spec = importlib.util.spec_from_file_location(
-            "volcano_query_test", f"{REPO}/shared/scripts/volcano_query.py")
-        mod = importlib.util.module_from_spec(spec)
-        _sys.argv = [
-            "volcano_query.py",
-            "--ep-dir", str(tmp_path),
-            "--track-num", "1",
-            "--env", f"{REPO}/.env",
-            "--interval", "0",
-            "--max-attempts", "3",
-        ]
-        spec.loader.exec_module(mod)
+    import importlib.util, sys as _sys
+    spec = importlib.util.spec_from_file_location(
+        "volcano_query_test", f"{REPO}/shared/scripts/volcano_query.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    with patch("requests.post", return_value=fake_resp), \
+         patch("sys.argv", [
+             "volcano_query.py",
+             "--ep-dir", str(tmp_path),
+             "--track-num", "1",
+             "--env", f"{REPO}/.env",
+             "--interval", "0",
+             "--max-attempts", "3",
+         ]):
         mod.main()
 
     raw = json.loads((task_dir / "volcano_raw_track1.json").read_text())
