@@ -3,12 +3,15 @@
 import importlib.util
 import json
 import sys
+import unittest.mock
 from pathlib import Path
 
 import pytest
 
-REPO = "/Users/houyuxin/08Coding/podcast-cutter-skills"
-SCRIPTS = Path(REPO) / "shared" / "scripts"
+REPO = Path(__file__).resolve().parents[2]
+SCRIPTS = REPO / "shared" / "scripts"
+
+sys.path.insert(0, str(SCRIPTS))
 
 
 def _load_mod():
@@ -16,7 +19,6 @@ def _load_mod():
         "align_tracks", SCRIPTS / "align_tracks.py"
     )
     mod = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(SCRIPTS))
     spec.loader.exec_module(mod)
     return mod
 
@@ -57,13 +59,13 @@ def test_timestamp_offset(tmp_path):
     (in_dir / "audio_meta.json").write_text(json.dumps(_audio_meta(2)))
 
     mod = _load_mod()
-    sys.argv = [
+    with unittest.mock.patch("sys.argv", [
         "align_tracks.py",
         "--ep-dir", str(ep_dir),
         "--t1", "10:00:00",
         "--t2", "10:00:03",
-    ]
-    mod.main()
+    ]):
+        mod.main()
 
     meta = json.loads((in_dir / "audio_meta.json").read_text())
     assert meta["track_offsets_ms"] == [0, 3000]
@@ -110,8 +112,8 @@ def test_transcript_offset(tmp_path):
     (td / "volcano_raw_track2.json").write_text(json.dumps(_raw_json(words2)))
 
     mod = _load_mod()
-    sys.argv = ["align_tracks.py", "--ep-dir", str(ep_dir)]
-    mod.main()
+    with unittest.mock.patch("sys.argv", ["align_tracks.py", "--ep-dir", str(ep_dir)]):
+        mod.main()
 
     meta = json.loads((in_dir / "audio_meta.json").read_text())
     offsets = meta["track_offsets_ms"]
@@ -131,8 +133,8 @@ def test_single_track_noop(tmp_path):
     (in_dir / "audio_meta.json").write_text(json.dumps(_audio_meta(1)))
 
     mod = _load_mod()
-    sys.argv = ["align_tracks.py", "--ep-dir", str(ep_dir)]
-    mod.main()
+    with unittest.mock.patch("sys.argv", ["align_tracks.py", "--ep-dir", str(ep_dir)]):
+        mod.main()
 
     meta = json.loads((in_dir / "audio_meta.json").read_text())
     assert meta["track_offsets_ms"] == [0]

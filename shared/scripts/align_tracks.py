@@ -79,6 +79,8 @@ def _clap_offsets(in_dir: Path, n_tracks: int) -> list[int]:
         )
         raw = proc.stdout
         n_samples = len(raw) // 2
+        if n_samples == 0:
+            raise RuntimeError(f"No audio samples decoded from {wav} — is the file valid?")
         samples = struct.unpack(f"{n_samples}h", raw[: n_samples * 2])
         peak_idx = max(range(n_samples), key=lambda k: abs(samples[k]))
         peak_ms = int(peak_idx * 1000 / SAMPLE_RATE)
