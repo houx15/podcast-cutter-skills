@@ -63,14 +63,46 @@ def main() -> None:
     # ── Resume path ──────────────────────────────────────────────────────────
     if args.resume:
         delete_file = ep / "3_review" / "delete_segments_edited.json"
-        if not delete_file.exists():
-            print(f"[pipeline] ERROR: {delete_file} not found. Complete the browser review first.")
-            sys.exit(1)
+        self_review = ep / "2_analysis" / "self_review.json"
+
+        if delete_file.exists():
+            # Post-human-review: stage 4
+            if not _done(ep / "4_cut" / "cut.wav"):
+                _run([PYTHON, str(sc / "cut_audio.py"), "--ep-dir", str(ep)], "4.0 cut audio")
+            _run([PYTHON, str(sc / "trim_silences.py"), "--ep-dir", str(ep)], "4.1 trim silences")
+            print(f"\n[pipeline] Done. Output: {ep / '4_cut' / 'cut.wav'}")
             return
-        if not _done(ep / "4_cut" / "cut.wav"):
-            _run([PYTHON, str(sc / "cut_audio.py"), "--ep-dir", str(ep)], "4.0 cut audio")
-        _run([PYTHON, str(sc / "trim_silences.py"), "--ep-dir", str(ep)], "4.1 trim silences")
-        print(f"\n[pipeline] Done. Output: {ep / '4_cut' / 'cut.wav'}")
+
+        if self_review.exists():
+            # Post-agent-analysis: stage 3.0
+            html = ep / "3_review" / "review_enhanced.html"
+            if not _done(html):
+                _run([PYTHON, str(sc / "generate_review_html.py"), "--ep-dir", str(ep)],
+                     "3.0 generate review HTML")
+            print(f"""
+[pipeline] ────────────────────────────────────────────────────────────
+  Analysis complete. Human review required.
+
+  Review file : {ep / '3_review' / 'review_enhanced.html'}
+  Start server: python shared/scripts/review_server.py --ep-dir {ep} --port 5050
+
+  Steps:
+    1. Start the review server (command above)
+    2. Open the review file in your browser
+    3. Review suggested cuts — accept, reject, or adjust
+    4. Click Export (saves delete_segments_edited.json automatically)
+    5. Run this to finish:
+         python shared/scripts/run_pipeline.py --ep-dir {ep} --resume
+[pipeline] ────────────────────────────────────────────────────────────
+""")
+            return
+
+        # Neither: analysis not complete
+        ctx = ep / "2_analysis" / "analysis_context.md"
+        print(f"[pipeline] ERROR: Agent analysis not complete.")
+        print(f"  Read {ctx} and write rough_cuts.json, fine_cuts.json, self_review.json")
+        print(f"  Then run: python shared/scripts/run_pipeline.py --ep-dir {ep} --resume")
+        sys.exit(1)
         return
 
     # ── Stage 1.0: prepare audio ─────────────────────────────────────────────
@@ -126,38 +158,25 @@ def main() -> None:
     if not _done(ep / "1_transcribe" / "sentences.json"):
         _run([PYTHON, str(sc / "make_sentences.py"), "--ep-dir", str(ep)], "1.4 make sentences")
 
-    # ── Stage 2.1: rough cuts ────────────────────────────────────────────────
-    if not _done(ep / "2_analysis" / "rough_cuts.json"):
-        _run([PYTHON, str(sc / "analyze_rough.py"), "--ep-dir", str(ep)], "2.1 rough cut analysis")
+    # ── Stage 2.0: build analysis context ────────────────────────────────────
+    if not _done(ep / "2_analysis" / "analysis_context.md"):
+        _run([PYTHON, str(sc / "build_analysis_context.py"), "--ep-dir", str(ep)],
+             "2.0 build analysis context")
 
-    # ── Stage 2.2: fine cuts ─────────────────────────────────────────────────
-    if not _done(ep / "2_analysis" / "fine_cuts.json"):
-        _run([PYTHON, str(sc / "analyze_fine.py"), "--ep-dir", str(ep)], "2.2 fine cut analysis")
-
-    # ── Stage 2.3: self-review ───────────────────────────────────────────────
-    if not _done(ep / "2_analysis" / "self_review.json"):
-        _run([PYTHON, str(sc / "self_review.py"), "--ep-dir", str(ep)], "2.3 self-review")
-
-    # ── Stage 3.0: review HTML ───────────────────────────────────────────────
-    html = ep / "3_review" / "review_enhanced.html"
-    if not _done(html):
-        _run([PYTHON, str(sc / "generate_review_html.py"), "--ep-dir", str(ep)], "3.0 generate review HTML")
-
-    # ── Pause: human review ──────────────────────────────────────────────────
+    # ── Pause: agent analysis ─────────────────────────────────────────────────
     print(f"""
 [pipeline] ────────────────────────────────────────────────────────────
-  Transcription and analysis complete. Human review required.
+  Transcription complete. Agent analysis required.
 
-  Review file : {html}
-  Start server: python shared/scripts/review_server.py --ep-dir {ep} --port 5050
+  Context file: {ep / '2_analysis' / 'analysis_context.md'}
 
-  Steps:
-    1. Start the review server (command above)
-    2. Open the review file in your browser
-    3. Review suggested cuts — accept, reject, or adjust
-    4. Click Export (saves delete_segments_edited.json automatically)
-    5. Run this to finish:
-         python shared/scripts/run_pipeline.py --ep-dir {ep} --resume
+  As the orchestrating agent, read the context file and write:
+    - {ep / '2_analysis' / 'rough_cuts.json'}
+    - {ep / '2_analysis' / 'fine_cuts.json'}
+    - {ep / '2_analysis' / 'self_review.json'}
+
+  Then resume:
+    python shared/scripts/run_pipeline.py --ep-dir {ep} --resume
 [pipeline] ────────────────────────────────────────────────────────────
 """)
 

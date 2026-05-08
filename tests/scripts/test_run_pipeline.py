@@ -24,8 +24,28 @@ def _make_meta(ep_dir: Path, n_tracks: int = 1) -> None:
     }))
 
 
-def test_resume_requires_delete_segments(tmp_path):
-    """--resume without delete_segments_edited.json exits with code 1."""
+def _make_transcribe(ep_dir: Path, n_tracks: int = 1) -> None:
+    td = ep_dir / "1_transcribe"
+    td.mkdir(parents=True, exist_ok=True)
+    for i in range(1, n_tracks + 1):
+        (td / f"volcano_raw_track{i}.json").write_text("{}")
+    (td / "words.json").write_text('{"words":[]}')
+    (td / "sentences.json").write_text('{"sentences":[]}')
+
+
+def _make_analysis(ep_dir: Path) -> None:
+    ad = ep_dir / "2_analysis"
+    ad.mkdir(parents=True, exist_ok=True)
+    (ad / "analysis_context.md").write_text("# context")
+    (ad / "rough_cuts.json").write_text('{"deletes":[]}')
+    (ad / "fine_cuts.json").write_text('{"deletes":[]}')
+    (ad / "self_review.json").write_text('{"deletes":[],"flags":[],"summary":"ok"}')
+
+
+# ── resume tests ─────────────────────────────────────────────────────────────
+
+def test_resume_no_analysis_exits_error(tmp_path):
+    """--resume with no self_review.json and no delete_segments exits with code 1."""
     mod = _load()
     ep_dir = tmp_path / "ep"
     (ep_dir / "3_review").mkdir(parents=True)
@@ -37,13 +57,30 @@ def test_resume_requires_delete_segments(tmp_path):
     mock_run.assert_not_called()
 
 
-def test_resume_runs_stage4(tmp_path):
-    """--resume with delete_segments_edited.json runs cut_audio.py and trim_silences.py."""
+def test_resume_with_self_review_runs_html_generation(tmp_path):
+    """--resume with self_review.json (no delete_segments) runs generate_review_html.py."""
     mod = _load()
     ep_dir = tmp_path / "ep"
-    review_dir = ep_dir / "3_review"
-    review_dir.mkdir(parents=True)
-    (review_dir / "delete_segments_edited.json").write_text('{"deletes": []}')
+    _make_analysis(ep_dir)
+
+    with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir), "--resume"]):
+        with unittest.mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mod.main()
+
+    scripts_called = [Path(c.args[0][1]).name for c in mock_run.call_args_list]
+    assert "generate_review_html.py" in scripts_called
+    assert "cut_audio.py" not in scripts_called
+
+
+def test_resume_with_delete_segments_runs_stage4(tmp_path):
+    """--resume with delete_segments_edited.json runs cut_audio.py + trim_silences.py."""
+    mod = _load()
+    ep_dir = tmp_path / "ep"
+    _make_analysis(ep_dir)
+    rd = ep_dir / "3_review"
+    rd.mkdir(parents=True)
+    (rd / "delete_segments_edited.json").write_text('{"deletes":[]}')
 
     with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir), "--resume"]):
         with unittest.mock.patch("subprocess.run") as mock_run:
@@ -55,27 +92,36 @@ def test_resume_runs_stage4(tmp_path):
     assert "trim_silences.py" in scripts_called
 
 
-def test_skips_done_stages(tmp_path):
-    """All outputs already exist: no subprocess.run calls, prints review message."""
+def test_resume_skips_html_if_already_exists(tmp_path):
+    """--resume skips generate_review_html.py if review_enhanced.html already exists."""
     mod = _load()
     ep_dir = tmp_path / "ep"
-    _make_meta(ep_dir, n_tracks=1)
-
-    td = ep_dir / "1_transcribe"
-    td.mkdir(parents=True)
-    for f in ["volcano_raw_track1.json", "words.json", "sentences.json"]:
-        (td / f).write_text("{}")
-    ad = ep_dir / "2_analysis"
-    ad.mkdir(parents=True)
-    for f in ["rough_cuts.json", "fine_cuts.json", "self_review.json"]:
-        (ad / f).write_text("{}")
+    _make_analysis(ep_dir)
     rd = ep_dir / "3_review"
     rd.mkdir(parents=True)
     (rd / "review_enhanced.html").write_text("<html/>")
 
-    with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir)]):
+    with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir), "--resume"]):
         with unittest.mock.patch("subprocess.run") as mock_run:
             mock_run.return_value.returncode = 0
+            mod.main()
+
+    scripts_called = [Path(c.args[0][1]).name for c in mock_run.call_args_list]
+    assert "generate_review_html.py" not in scripts_called
+
+
+# ── normal run tests ──────────────────────────────────────────────────────────
+
+def test_skips_done_stages(tmp_path):
+    """All stage outputs exist: no subprocess.run calls."""
+    mod = _load()
+    ep_dir = tmp_path / "ep"
+    _make_meta(ep_dir, n_tracks=1)
+    _make_transcribe(ep_dir, n_tracks=1)
+    _make_analysis(ep_dir)
+
+    with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir)]):
+        with unittest.mock.patch("subprocess.run") as mock_run:
             mod.main()
 
     mock_run.assert_not_called()
@@ -102,3 +148,23 @@ def test_new_episode_runs_prepare_audio_first(tmp_path):
 
     first_script = Path(mock_run.call_args_list[0].args[0][1]).name
     assert first_script == "prepare_audio.py"
+
+
+def test_stage2_context_builder_called_after_transcription(tmp_path):
+    """After transcription stages, build_analysis_context.py is called."""
+    mod = _load()
+    ep_dir = tmp_path / "ep"
+    _make_meta(ep_dir, n_tracks=1)
+    _make_transcribe(ep_dir, n_tracks=1)
+    # No analysis_context.md yet
+
+    with unittest.mock.patch("sys.argv", ["run_pipeline.py", "--ep-dir", str(ep_dir)]):
+        with unittest.mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value.returncode = 0
+            mod.main()
+
+    scripts_called = [Path(c.args[0][1]).name for c in mock_run.call_args_list]
+    assert "build_analysis_context.py" in scripts_called
+    assert "analyze_rough.py" not in scripts_called
+    assert "analyze_fine.py" not in scripts_called
+    assert "self_review.py" not in scripts_called
