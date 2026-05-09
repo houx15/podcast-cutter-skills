@@ -1,8 +1,14 @@
 # podcast-cutter-skills
 
-A Python toolkit for cutting Chinese podcast episodes with AI assistance. Raw dual-track recordings go in; a clean, sample-accurate `cut.wav` comes out. The pipeline covers audio preparation, Volcano Engine v3 AUC ASR transcription, agent-driven analysis (rough cut, fine cut, self-review), browser-based human review, and precise ffmpeg splicing with 25 ms crossfades.
+**Language: English | [中文](README.zh.md)**
 
-## Installation
+A Chinese-podcast editing toolkit that lets your AI coding agent (Claude Code / Codex CLI / Gemini CLI) take raw recordings and produce a clean, sample-accurate `cut.wav`. The pipeline covers ASR transcription, agent-driven cut analysis, browser-based human review, and precise ffmpeg splicing.
+
+> 📖 Looking to drive this repo from an agent? See **[AGENTS.md](AGENTS.md)** — that's the contract your agent reads.
+
+---
+
+## Quick start for users
 
 ### 1. Clone the repo
 
@@ -29,166 +35,83 @@ Verify: `ffmpeg -version` and `python3 --version` (need 3.10+).
 pip install -e ".[dev]"
 ```
 
-### 4. Get API keys
+### 4. Register Volcano Engine API keys
 
-You need one service (plus optional storage):
+We use [Volcano Engine Speech](https://www.volcengine.com/product/speech-tech) for Chinese ASR — it has the best Chinese accuracy we've found, supports word-level timestamps, and the free tier is generous.
 
-**Volcano Engine ASR** (transcription)
-- Sign up at [console.volcengine.com](https://console.volcengine.com/)
-- Go to **Speech → API Keys** and create a key → `VOLC_API_KEY`
-- Enable the `volc.seedasr.auc` resource (Chinese big-model ASR)
+1. Sign up at [console.volcengine.com](https://console.volcengine.com/) (real-name verification required for mainland users).
+2. Open **语音技术 (Speech) → 应用管理 (Apps)** and create an app — record the **APP ID**.
+3. Open **API 访问密钥 (API Keys)** and create a key — record the **API Key**.
+4. In the **大模型录音文件识别 (Large-model File Recognition)** product page, click **开通 (Enable)** for the resource `volc.bigasr.auc` (a.k.a. `volc.seedasr.auc`).
+5. (Optional, for files larger than ~50 MB) Create a **TOS bucket** for audio uploads, and an **access key / secret key** with read+write on that bucket.
 
-**Audio upload** (optional — needed for files > ~50 MB)
-- Volcano TOS bucket (`TOS_*`) or any S3-compatible storage (`S3_*`)
-- Without this, the pipeline falls back to [uguu.se](https://uguu.se) (public, 24 h TTL) with a warning
-
-See [docs/configuration.md](docs/configuration.md) for the full variable reference.
-
-### 5. Configure environment
+Copy the template and fill in the keys:
 
 ```bash
 cp .env.example .env
-# Edit .env and fill in VOLC_API_KEY (and VOLC_RESOURCE_ID if needed)
+# Edit .env — at minimum set VOLC_API_KEY and VOLC_RESOURCE_ID=volc.bigasr.auc
 ```
 
-### 6. Verify the installation
+The full variable reference lives in [docs/configuration.md](docs/configuration.md).
 
-```bash
-python -m pytest          # 89 tests — all should pass
-bash shared/scripts/install/check_deps.sh   # checks ffmpeg + python versions
-```
+### 5. Tell your agent to use this repo
+
+Open the repo in **Claude Code**, **Codex CLI**, or **Gemini CLI** — they all auto-load this project's instructions from `AGENTS.md`/`CLAUDE.md`/`GEMINI.md` and discover the bundled skills under `.claude/skills/`, `.codex/skills/`, `.gemini/skills/`.
+
+Then drop your recording into `recordings/` and prompt the agent in plain language:
+
+> 剪播客 — 录音在 `recordings/ep01.wav`，episode id 是 `2026-05-08-ep01`。
+
+The agent will read `.claude/skills/podcast-cut-剪播客/SKILL.md`, run each stage end-to-end, pause for your browser review at stage 3, and produce `output/<ep-id>/4_cut/cut.wav` plus `output/<ep-id>/5_shownotes/shownotes.md`.
+
+If you'd rather drive the scripts by hand (no agent), see **[AGENTS.md](AGENTS.md)** — it lists every script with its inputs and outputs.
 
 ---
 
-## Environment variables for agents
+## How the pipeline works
 
-The scripts load `.env` via `python-dotenv`, which checks **shell environment variables first**, then falls back to the `.env` file. This means:
+```
+recording.wav  ─┐
+                │  Stage 1 — Transcribe
+                │   ffmpeg normalize → Volcano ASR → word + sentence JSON
+                ▼
+         sentences.json
+                │  Stage 2 — Analyze (your agent does the work)
+                │   reads editing rules + preferences, proposes deletions
+                ▼
+   rough_cuts.json + fine_cuts.json + self_review.json
+                │  Stage 3 — Human review
+                │   browser timeline, accept/reject each delete
+                ▼
+   delete_segments_edited.json
+                │  Stage 4 — Cut
+                │   sample-accurate ffmpeg splice with 25 ms crossfades
+                ▼
+            cut.wav
+                │  Stage 5 — Show notes (optional)
+                │   agent drafts shownotes.md from the cut transcript
+                ▼
+          shownotes.md
+```
 
-- **Local agents** (Claude Code, Codex CLI, Gemini CLI): create `.env` once in the repo root — every agent running in that directory picks it up automatically.
-- **Remote / cloud agents**: set `VOLC_API_KEY` as environment variables in the agent's runtime config (e.g., GitHub Actions secrets, Cowork env vars). No `.env` file needed.
-
-Required variables at minimum:
-
-| Variable | Purpose |
-|----------|---------|
-| `VOLC_API_KEY` | Volcano Engine ASR authentication |
-| `VOLC_RESOURCE_ID` | Set to `volc.seedasr.auc` |
+Stage outputs are individual files under `output/<ep-id>/`. Re-running a stage overwrites only that stage's output — the upstream files stay intact, so you can iterate cheaply.
 
 ---
 
-## Quick Start
+## What's not great yet
 
-The agent (Claude Code, Codex CLI) drives the workflow by following SKILL.md. Stages run as individual scripts:
+Honest list of current gaps — contributions welcome:
 
-```bash
-# Stage 1: Transcribe (~5–20 min)
-python shared/scripts/prepare_audio.py --ep-dir output/2026-05-08-ep01 --track1 recordings/host.wav --track2 recordings/guest.wav
-python shared/scripts/volcano_submit.py --audio-file output/2026-05-08-ep01/input/working_track1.wav --track-num 1 --ep-dir output/2026-05-08-ep01
-python shared/scripts/volcano_query.py --track-num 1 --ep-dir output/2026-05-08-ep01
-# ...repeat submit/query for track 2 if dual-track...
-python shared/scripts/transcribe_merge.py --ep-dir output/2026-05-08-ep01
-python shared/scripts/make_sentences.py --ep-dir output/2026-05-08-ep01
+- **Filler-word trimming (口癖) is rough.** The rule-based pass catches the obvious "嗯/呃/那个/就是" cases but still leaves residue, and the fine-cut agent pass occasionally over-cuts pauses that carried meaning. Expect to spend review time on these.
+- **No background music / scoring.** The pipeline outputs a clean speech `cut.wav` and stops there. There's no built-in step for intro/outro stingers, ducking, or per-section BGM — you'll need to bring those into your DAW manually.
+- **Mono-recording speaker diarization is unreliable.** Volcano's diarization on a single mixed track frequently returns `speaker=null`. Dual-track recording (one mic per speaker) sidesteps this entirely and is strongly recommended.
+- **Show notes are template-driven, not adaptive.** Stage 5 produces a workable draft in our podcast's voice, but you'll usually want to rewrite the intro paragraph and Highlights section yourself.
 
-# Stage 2: Agent reads sentences.json + rules, writes rough/fine/self_review JSON
-# (See SKILL.md for instructions and JSON formats)
+---
 
-# Stage 3: Review
-python shared/scripts/generate_review_html.py --ep-dir output/2026-05-08-ep01
-python shared/scripts/review_server.py --ep-dir output/2026-05-08-ep01 --port 5050
-# Open the printed HTML, review, click Export
+## For contributors
 
-# Stage 4: Cut
-python shared/scripts/cut_audio.py --ep-dir output/2026-05-08-ep01
-python shared/scripts/trim_silences.py --ep-dir output/2026-05-08-ep01
-# Output: output/2026-05-08-ep01/4_cut/cut.wav
-```
-
-For details (alignment options, error codes, the analysis JSON formats), see `.claude/skills/podcast-cut-剪播客/SKILL.md` or `docs/剪播客/快速上手.md`.
-
-## Using This Skill in a Remote Agent (Cowork etc.)
-
-A remote agent (e.g. Cowork, GitHub Actions, a hosted Claude Code session) runs the same SKILL.md you'd run locally — but three things change because the agent doesn't share your filesystem or browser:
-
-### 1. Configure secrets, not `.env`
-
-The agent has no `.env` file. Set these as secrets / runtime env vars in the remote runtime:
-
-| Secret | Required? | Purpose |
-|--------|-----------|---------|
-| `VOLC_API_KEY` | yes | Volcano ASR (new console) |
-| `VOLC_RESOURCE_ID` | yes | `volc.seedasr.auc` |
-| `TOS_ACCESS_KEY` | yes | Object storage for audio uploads |
-| `TOS_SECRET_KEY` | yes | |
-| `TOS_BUCKET` | yes | |
-| `TOS_ENDPOINT` | yes | e.g. `tos-cn-beijing.volces.com` |
-
-`python-dotenv` reads shell env first, so the same scripts work without modification. (Old-console Volcano accounts can use `VOLC_APP_KEY` + `VOLC_ACCESS_KEY` instead of `VOLC_API_KEY`.)
-
-### 2. Get recordings to the agent
-
-The agent has no local `recordings/` dir. Two patterns:
-
-**A. Pre-upload recordings to TOS yourself** (recommended for large dual-track files):
-
-```bash
-# On your laptop — upload to a bucket the agent's TOS keys can read:
-aws s3 cp track1-host.wav s3://your-bucket/episodes/ep04/track1.wav --endpoint-url https://tos-s3-cn-beijing.volces.com
-```
-
-Then trigger the agent with the URL. In `prepare_audio.py`, point `--track1` at a local path the agent downloads first, e.g.:
-
-```bash
-curl -fsSLo recordings/track1.wav "https://...presigned-url..."
-python shared/scripts/prepare_audio.py --ep-dir output/ep04 --track1 recordings/track1.wav
-```
-
-**B. Commit small reference clips to a private repo branch**, and have the agent check out that branch. Practical for short test clips, not for full recordings.
-
-### 3. Skip the browser review step
-
-`review_server.py` serves on `localhost:5050` — no use on a remote agent. Two options:
-
-**A. Auto-accept the agent's analysis** (full automation): after the agent writes `rough_cuts.json` / `fine_cuts.json` / `self_review.json`, it composes `delete_segments_edited.json` directly from those (union of `rough_cuts.deletes` + `fine_cuts.deletes`, dropping anything the `self_review.flags` marked as `false_positive`), then runs stage 4. No human in the loop.
-
-**B. Two-shot with you doing review locally**: agent runs through stage 3.0, uploads `review_enhanced.html` + `delete_segments.json` somewhere you can fetch (TOS, gist, PR). You review locally, push back `delete_segments_edited.json`, then trigger the agent again to finish stage 4.
-
-For Cowork specifically, **Pattern A** is the natural fit — the orchestrating agent is the analyst, and you trust its judgment based on the editing rules in `shared/rules/editing/`. If you want oversight, run a small clip locally first, tune the rules, then let Cowork loose on full episodes.
-
-### 4. Where the output lives
-
-`output/<ep-id>/4_cut/cut.wav` and `5_shownotes/shownotes.md` end up on the agent's filesystem. To get them back:
-
-- **TOS upload**: have the agent upload `cut.wav` to your TOS bucket as a final step (`aws s3 cp` or extend `lib/upload.py`).
-- **Commit & PR**: agent commits `5_shownotes/shownotes.md` (text only) to a branch and opens a PR. `cut.wav` is too large for git — keep it in object storage.
-- **Slack / direct delivery**: depends on the agent runtime — Cowork can post the TOS URL back in the channel.
-
-### Minimal trigger message (Cowork example)
-
-> "剪播客 — 录音在 TOS: `s3://your-bucket/episodes/ep04/track1.wav` + `track2.wav`，episode id `ep04`。请按 Pattern A 自动完成全流程，输出 `cut.wav` + `shownotes.md` 上传回 `s3://your-bucket/episodes/ep04/output/`。"
-
-The agent reads `.claude/skills/podcast-cut-剪播客/SKILL.md`, runs each stage, does the analysis itself, and posts the output URLs back when done.
-
-## Stage Pipeline
-
-| Stage | Script | Input | Output |
-|-------|--------|-------|--------|
-| 1.0 | `prepare_audio.py` | Recording files | `input/working_track*.wav`, `audio_meta.json` |
-| 1.05 | `align_tracks.py` (optional) | working WAV or ASR output | `track_offsets_ms` in `audio_meta.json` |
-| 1.2a | `volcano_submit.py` | working WAV (uploads internally) | `task_id_track*.txt` |
-| 1.2b | `volcano_query.py` | Task ID | `volcano_raw_track*.json` |
-| 1.3 | `transcribe_merge.py` | volcano_raw × n | `words.json` |
-| 1.4 | `make_sentences.py` | words.json | `sentences.json` |
-| 2.1–2.3 | *(agent reads sentences.json + rules)* | sentences.json + rules | `rough_cuts.json`, `fine_cuts.json`, `self_review.json` |
-| 3.0 | `generate_review_html.py` + `review_server.py` | analysis | `review_enhanced.html` |
-| 3.1 | (browser, manual) | — | `delete_segments_edited.json` |
-| 4.0 | `cut_audio.py` | working WAV + delete_segments_edited | `cut.wav` |
-| 4.1 | `trim_silences.py` | cut.wav | cut.wav (head/tail trimmed) |
-| 5.0 | `cut_transcript.py` | sentences.json + deletes | `5_shownotes/cut_transcript.json` |
-| 5.1 | *(agent reads cut_transcript + shownotes_example)* | cut_transcript.json + user template | `5_shownotes/shownotes.md` |
-
-All scripts are idempotent — re-running overwrites the previous output for that stage only.
-
-## Project Layout
+### Repository layout
 
 ```
 podcast-cutter-skills/
@@ -196,54 +119,64 @@ podcast-cutter-skills/
 │   ├── scripts/              # One script per pipeline stage
 │   │   ├── lib/              # Shared library modules
 │   │   │   ├── config.py         # Env + LLM config loader
-│   │   │   ├── ffmpeg_wrap.py    # Sole ffmpeg entry point (includes silence-trap guard)
+│   │   │   ├── ffmpeg_wrap.py    # Sole ffmpeg entry point (silence-trap guarded)
 │   │   │   ├── volcano_client.py # Volcano Engine ASR HTTP client
 │   │   │   ├── upload.py         # TOS → S3 → uguu.se upload chain
 │   │   │   ├── json_io.py        # Atomic JSON read/write helpers
 │   │   │   └── audio_constants.py# Sample-rate, bit-depth, crossfade constants
 │   │   └── install/          # Dependency check + asset fetch scripts
 │   ├── rules/
-│   │   ├── editing/          # LLM editing rules (Chinese Markdown, concatenated as system prompt)
+│   │   ├── editing/          # Editing rules (Chinese Markdown — agent system prompt)
 │   │   └── users/default/    # Default user preferences (preferences.yaml, hotwords.txt)
 │   └── test_fixtures/        # Audio fixtures used by the test suite
-├── tests/                    # pytest suite (89 tests)
+├── tests/                    # pytest suite
 │   ├── lib/                  # Tests for lib/ modules
 │   ├── scripts/              # Tests for each pipeline script
 │   └── install/              # Tests for install scripts
 ├── docs/
 │   ├── 剪播客/               # Per-stage documentation (stages 1–4) + quick-start guide
 │   ├── configuration.md      # All .env variables with descriptions
-│   └── volcano_asr.md        # Volcano ASR API reference notes
-├── .claude/
-│   ├── skills/               # Claude Code slash commands
-│   └── agents/               # Reviewer subagents (spec-drift, ffmpeg-invariants, etc.)
+│   ├── volcano_asr.md        # Volcano ASR API reference notes
+│   └── volcano_tos_sdk.md    # Volcano TOS SDK / signing reference
+├── .claude/                  # Claude Code skills, agents, rules
+├── .codex/                   # Codex CLI skills + prompts
+├── .gemini/                  # Gemini CLI skills + commands
 ├── output/                   # Episode working directories (gitignored)
 ├── recordings/               # Raw input recordings (gitignored)
-├── .env.example              # Environment variable template
+├── .env.example
+├── AGENTS.md                 # Agent-facing project instructions
 ├── pyproject.toml
 └── CHANGELOG.md
 ```
 
-## Stage Documentation
+### Development
 
-- [阶段1 — 转录](docs/剪播客/阶段1-转录.md)
-- [阶段2 — 分析](docs/剪播客/阶段2-分析.md)
-- [阶段3 — 审查](docs/剪播客/阶段3-审查.md)
-- [阶段4 — 剪辑](docs/剪播客/阶段4-剪辑.md)
+```bash
+pytest                                      # full test suite
+pytest --cov=shared/scripts --cov-report=term-missing
+pytest tests/lib/test_ffmpeg_wrap.py -v     # single module
+```
+
+All new behavior must be test-driven — write the failing test first, then implement. The `ffmpeg-invariants-reviewer` subagent enforces that every ffmpeg call goes through `lib/ffmpeg_wrap.run_ffmpeg`.
+
+### Stage documentation
+
+- [阶段 1 — 转录](docs/剪播客/阶段1-转录.md)
+- [阶段 2 — 分析](docs/剪播客/阶段2-分析.md)
+- [阶段 3 — 审查](docs/剪播客/阶段3-审查.md)
+- [阶段 4 — 剪辑](docs/剪播客/阶段4-剪辑.md)
 - [Configuration reference](docs/configuration.md)
 - [快速上手（中文）](docs/剪播客/快速上手.md)
 
-## Development
+---
 
-```bash
-# Run the full test suite
-pytest
+## Acknowledgements
 
-# With coverage
-pytest --cov=shared/scripts --cov-report=term-missing
+This repo borrows ideas, patterns, and editing-rule inspiration from several open-source projects. Huge thanks to their authors:
 
-# Run a specific module's tests
-pytest tests/lib/test_ffmpeg_wrap.py -v
-```
+- [kennyzheng-builds/ai-podcast-editor](https://github.com/kennyzheng-builds/ai-podcast-editor) — Descript-inspired transcription-driven editor that informed our text↔audio mapping and filler-detection thinking.
+- [JasonYpro/autocut-skills](https://github.com/JasonYpro/autocut-skills) — AI-driven autocut for spoken-word video, with a similar Volcano ASR + browser-review flow that shaped our review UI.
+- [luoyuweidu1/podcastcut-skills](https://github.com/luoyuweidu1/podcastcut-skills) — Claude Code Skills approach to podcast cutting that influenced our skill/stage layout.
+- [avaleenlhs-gif/zh-podcast-filler-cut](https://github.com/avaleenlhs-gif/zh-podcast-filler-cut) — Whisper + ffmpeg filler-word cutter whose heuristic词表 informed our rule-based pass.
 
-All new behavior must be test-driven: write a failing test first, then implement. The `ffmpeg-invariants-reviewer` subagent enforces that all ffmpeg calls go through `lib/ffmpeg_wrap.run_ffmpeg`.
+If you're building in this space, those repos are well worth a read.
