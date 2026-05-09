@@ -100,6 +100,36 @@ def test_dual_track_interleaved_words_do_not_shred(tmp_path):
     assert s2["text"] == "再见朋友"
 
 
+def test_word_indices_field_matches_sentence_text(tmp_path):
+    """sentence.text must equal the concatenation of words[i].text for each
+    i in sentence.word_indices. Critical: because word_idx_start/end span
+    the GLOBAL words list (interleaving speakers in dual-track), they alone
+    can't reconstruct the sentence's text. word_indices is the explicit list."""
+    ep = _words_json(tmp_path, [
+        _w(0, "S1",   0, 100, "你", 0),
+        _w(1, "S2",  50, 150, "再", 0),
+        _w(2, "S1", 100, 200, "好", 0),
+        _w(3, "S2", 150, 250, "见", 0),
+        _w(4, "S1", 200, 300, "世", 0),
+        _w(5, "S2", 250, 350, "朋", 0),
+        _w(6, "S1", 300, 400, "界", 0),
+        _w(7, "S2", 350, 450, "友", 0),
+    ])
+    subprocess.run(
+        ["python", "shared/scripts/make_sentences.py", "--ep-dir", str(ep)],
+        check=True, capture_output=True, cwd=REPO,
+    )
+    words = json.loads((ep / "1_transcribe" / "words.json").read_text())["words"]
+    sents = json.loads((ep / "1_transcribe" / "sentences.json").read_text())["sentences"]
+    for s in sents:
+        assert "word_indices" in s, "schema must include explicit word_indices list"
+        joined = "".join(words[i]["text"] for i in s["word_indices"])
+        assert joined == s["text"], (
+            f"sentence text {s['text']!r} != joined words {joined!r} "
+            f"at indices {s['word_indices']}"
+        )
+
+
 def test_whitespace_words_split_without_polluting_text(tmp_path):
     """Volcano emits whitespace-only tokens at utterance boundaries. They
     should force a split (so two real utterances don't get glued together)

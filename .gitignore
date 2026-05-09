@@ -4,6 +4,8 @@
 
 # Claude Code - local settings contain personal preferences and may include tokens
 .claude/settings.local.json
+.claude/settings.json
+.claude/scheduled_tasks.lock
 .claude/CLAUDE.local.md
 .claude/*.local.*
 CLAUDE.local.md
@@ -107,6 +109,7 @@ coverage/
 
 # Python
 htmlcov/
+.coverage
 configs/
 
 # =============================================================================

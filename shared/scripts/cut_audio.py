@@ -32,10 +32,49 @@ def _keep_ranges(duration_ms: int, deletes: list[tuple[int, int]]) -> list[tuple
     return keeps
 
 
+def _build_dual_track_mix(in_dir: Path, meta: dict, out_path: Path, log_path: Path, run_ffmpeg) -> None:
+    """Mix all working_track*.wav into a single mono wav, applying track_offsets_ms.
+
+    Each track i is delayed by offsets[i] ms (adelay), then summed via amix with
+    normalize=1 (each input scaled by 1/N) to keep peaks safe across overlap.
+    """
+    tracks = meta["tracks"]
+    n = len(tracks)
+    offsets = list(meta.get("track_offsets_ms") or [])
+    while len(offsets) < n:
+        offsets.append(0)
+
+    cmd: list[str] = []
+    for t in tracks:
+        cmd.extend(["-i", str(in_dir / t["file"])])
+
+    filter_parts = []
+    mix_labels = []
+    for i, off in enumerate(offsets[:n]):
+        if off > 0:
+            filter_parts.append(f"[{i}:a]adelay={off}|{off}[a{i}]")
+            mix_labels.append(f"[a{i}]")
+        else:
+            mix_labels.append(f"[{i}:a]")
+    filter_parts.append(
+        f"{''.join(mix_labels)}amix=inputs={n}:duration=longest:dropout_transition=0[out]"
+    )
+
+    cmd.extend([
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "[out]",
+        "-ac", "1",
+        "-c:a", "pcm_s16le",
+        str(out_path),
+    ])
+    run_ffmpeg(cmd, log_path=log_path)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ep-dir", required=True)
-    ap.add_argument("--track-num", type=int, default=1)
+    ap.add_argument("--track-num", type=int, default=1,
+                    help="single_track mode only: which working_track*.wav to cut")
     args = ap.parse_args()
 
     sys.path.insert(0, str(Path(__file__).parent))
@@ -47,8 +86,8 @@ def main() -> None:
     in_dir = ep_dir / "input"
     meta = json.loads((in_dir / "audio_meta.json").read_text())
     duration_ms = meta["total_duration_ms"]
+    mode = meta.get("mode", "single_track")
 
-    track_file = in_dir / f"working_track{args.track_num}.wav"
     edited = json.loads((ep_dir / "3_review" / "delete_segments_edited.json").read_text())
     active_deletes = [d for d in edited["deletes"] if d.get("user_action") != "rejected_by_user"]
     merged = _merge_deletes(active_deletes)
@@ -65,16 +104,26 @@ def main() -> None:
 
     xfade_s = SPLICE_XFADE_MS / 1000.0
 
-    if len(keeps) == 1:
-        s_ms, e_ms = keeps[0]
-        run_ffmpeg(
-            ["-i", str(track_file),
-             "-ss", str(s_ms / 1000.0), "-to", str(e_ms / 1000.0),
-             "-c:a", "pcm_s16le", str(out_file)],
-            log_path=log_dir / "cut.log",
-        )
-    else:
-        with tempfile.TemporaryDirectory() as td:
+    with tempfile.TemporaryDirectory() as td:
+        if mode == "two_track":
+            track_file = Path(td) / "mixed.wav"
+            _build_dual_track_mix(in_dir, meta, track_file, log_dir / "mix.log", run_ffmpeg)
+        else:
+            track_file = in_dir / f"working_track{args.track_num}.wav"
+
+        if len(keeps) == 1:
+            s_ms, e_ms = keeps[0]
+            run_ffmpeg(
+                ["-i", str(track_file),
+                 "-ss", str(s_ms / 1000.0), "-to", str(e_ms / 1000.0),
+                 "-c:a", "pcm_s16le", str(out_file)],
+                log_path=log_dir / "cut.log",
+            )
+        else:
+            # Per-segment fade-in/out + concat filter. Replaces the previous
+            # acrossfade chain, which silently dropped content when very short
+            # segments (≤2× xfade duration) appeared in the chain — a 60-input
+            # chain with one 0.03s segment lost ~6 minutes of audio.
             segments = []
             for i, (s_ms, e_ms) in enumerate(keeps):
                 seg = Path(td) / f"seg{i:04d}.wav"
@@ -84,30 +133,42 @@ def main() -> None:
                      "-c:a", "pcm_s16le", str(seg)],
                     check=True, capture_output=True,
                 )
-                segments.append(seg)
+                segments.append((seg, (e_ms - s_ms) / 1000.0))
 
-            prev_label = "[0:a]"
             fc_parts = []
-            for i in range(1, len(segments)):
-                out_label = f"[a{i}]"
-                fc_parts.append(
-                    f"{prev_label}[{i}:a]acrossfade=d={xfade_s}:c1=tri:c2=tri{out_label}"
-                )
-                prev_label = out_label
+            labels = []
+            for i, (seg, dur) in enumerate(segments):
+                # Cap the fade at half the segment so very short segments still
+                # work. A 30ms segment gets a 15ms fade-in and 15ms fade-out.
+                fd = min(xfade_s, dur / 2)
+                fade_filters = []
+                if fd > 0.001 and i > 0:
+                    fade_filters.append(f"afade=t=in:st=0:d={fd:.3f}")
+                if fd > 0.001 and i < len(segments) - 1:
+                    fade_filters.append(f"afade=t=out:st={dur - fd:.3f}:d={fd:.3f}")
+                lbl = f"[s{i}]"
+                if fade_filters:
+                    fc_parts.append(f"[{i}:a]{','.join(fade_filters)}{lbl}")
+                else:
+                    fc_parts.append(f"[{i}:a]anull{lbl}")
+                labels.append(lbl)
 
-            filter_complex = ";".join(fc_parts)
-            cmd = []  # run_ffmpeg adds -y itself
-            for seg in segments:
+            fc_parts.append(
+                f"{''.join(labels)}concat=n={len(segments)}:v=0:a=1[out]"
+            )
+
+            cmd = []
+            for seg, _ in segments:
                 cmd.extend(["-i", str(seg)])
             cmd.extend([
-                "-filter_complex", filter_complex,
-                "-map", prev_label,
+                "-filter_complex", ";".join(fc_parts),
+                "-map", "[out]",
                 "-c:a", "pcm_s16le", str(out_file),
             ])
             run_ffmpeg(cmd, log_path=log_dir / "cut.log")
 
     peak = volumedetect_max_db(out_file)
-    print(f"cut.wav: {len(keeps)} segment(s), peak={peak:.1f} dB → {out_file}")
+    print(f"cut.wav: mode={mode}, {len(keeps)} segment(s), peak={peak:.1f} dB → {out_file}")
 
 
 if __name__ == "__main__":

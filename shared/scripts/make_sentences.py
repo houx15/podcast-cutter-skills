@@ -16,6 +16,11 @@ MAX_SENT_CHARS = 50
 
 
 def _flush(buf: list[dict]) -> dict:
+    """Emit a sentence record. `word_indices` is the explicit list of GLOBAL
+    word indices that compose this sentence's text — needed for dual-track
+    where one speaker's words interleave with another's by timestamp.
+    `word_idx_start/end` describe only the global TIME range and may include
+    other-speaker words; never use them to reconstruct text."""
     return {
         "id": -1,  # reassigned after final sort
         "speaker": buf[0]["speaker"],
@@ -23,6 +28,7 @@ def _flush(buf: list[dict]) -> dict:
         "end_ms": buf[-1]["end_ms"],
         "word_idx_start": buf[0]["idx"],
         "word_idx_end": buf[-1]["idx"],
+        "word_indices": [w["idx"] for w in buf],
         "text": "".join(w["text"] for w in buf),
     }
 
